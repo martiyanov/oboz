@@ -7,7 +7,7 @@
   "maxArticlesPerSource": 150,
   "specializedSeverityFloor": 0.35,
   "limit": 12,
-  "cacheTtlSec": 300,
+  "cacheTtlSec": 1800,
   "wiki": true,
   "weights": {
     "severity": 0.4,

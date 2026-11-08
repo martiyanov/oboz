@@ -18,7 +18,7 @@ systemd-сервис oboz-web  (node web/server.mjs, 127.0.0.1:8788)
   │  импортирует src/digest.js — то же ядро, что у `./oboz news` и `./oboz tui`
   ▼
 20 RSS-лент + ru.wikipedia.org
-  кэш лент: .cache/rss (5 мин), Википедия: .cache/wiki (24 ч), ответы API: память процесса (3 мин)
+  кэш лент: .cache/rss (30 мин), Википедия: .cache/wiki (24 ч), ответы API: память процесса (3 мин)
 ```
 
 Почему `/oboz/`, а не корень: на `agonarena.ru` уже работает «Тренажёр переговоров» (прокси на
@@ -170,7 +170,7 @@ CLI, TUI и веба.
 | **502 Bad Gateway** на `/oboz/` | `systemctl status oboz-web`, `journalctl -u oboz-web -n 50`; сервис упал/не стартовал |
 | **404** на `/oboz/` | не задеплоена статика (`web/public/index.html`); повторить `deploy-web.sh` |
 | Пустой список событий | `curl /api/digest` — если пусто, реально нет событий выше порога; снизить порог; проверить `sourcesOk` в `stats` |
-| Данные несвежие | TTL кэша 3 мин; `refresh=1`; ленты кэшируются на 5 мин; проверить `journalctl` на ошибки источников |
+| Данные несвежие | TTL кэша 3 мин; `refresh=1`; ленты кэшируются на 30 мин (`cacheTtlSec=1800`); проверить `journalctl` на ошибки источников |
 | Ленты не грузятся с ВДС | `curl -A '<браузерный UA>' -m 15 https://tass.ru/rss/v2.xml` с сервера; часть сайтов режет дата-центры |
 | nginx не стартует | `sudo nginx -t`; откатить `agonarena_bot` из `/root/agonarena_bot.bak.*` |
 | Домен/префикс | адрес задаётся `location /oboz/` в nginx; приложение использует относительные пути и работает под любым префиксом |

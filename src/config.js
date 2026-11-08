@@ -11,7 +11,7 @@ export const DEFAULT_CONFIG = {
   maxArticlesPerSource: 150,
   specializedSeverityFloor: 0.35,
   limit: 12,
-  cacheTtlSec: 300,
+  cacheTtlSec: 1800,
   wiki: true,
   weights: { severity: 0.4, corroboration: 0.25, recency: 0.15, confidence: 0.2 },
   tierWeights: { A: 1.0, B: 0.85, C: 0.6 },

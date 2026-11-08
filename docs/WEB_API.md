@@ -113,7 +113,7 @@
 
 ### `GET /healthz`
 
-`{ "ok": true, "uptimeSec": 123, "version": "0.4.0", "cache": {"entries":3,"events":1}, "resources": {"rssMB": 115.2, "heapUsedMB": 28.4, "caches": {"digest":3,"events":1,"static":2}, "feedbackStored": 4} }`
+`{ "ok": true, "uptimeSec": 123, "version": "0.4.0", "cache": {"entries":3,"events":1}, "resources": {"rssMB": 115.2, "heapUsedMB": 28.4, "caches": {"digest":3,"events":1,"static":2}, "feedCacheTtlSec": 1800, "feedbackStored": 4} }`
 — блок `resources` для мониторинга памяти и кэшей.
 
 ## Требования к интерфейсу (`web/public/`)
