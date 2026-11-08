@@ -127,6 +127,9 @@ bash scripts/deploy-web.sh
 
 ## Эксплуатация
 
+Ресурсоёмкость и варианты экономии: [`RESOURCES.md`](RESOURCES.md).
+
+
 ```bash
 ssh openclaw@37.46.18.40
 sudo systemctl status oboz-web --no-pager

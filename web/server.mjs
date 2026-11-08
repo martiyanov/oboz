@@ -488,6 +488,12 @@ async function handleApi(req, res, url) {
       uptimeSec: Math.round((Date.now() - startedAt) / 1000),
       version: packageVersion,
       cache: { entries: digestCache.size, events: eventCache.size },
+      resources: {
+        rssMB: Number((process.memoryUsage().rss / 1048576).toFixed(1)),
+        heapUsedMB: Number((process.memoryUsage().heapUsed / 1048576).toFixed(1)),
+        caches: { digest: digestCache.size, events: eventCache.size, static: staticCache.size },
+        feedbackStored: stats.feedback || 0,
+      },
       stats,
     });
     return true;
@@ -553,6 +559,12 @@ const server = http.createServer(async (req, res) => {
         uptimeSec: Math.round((Date.now() - startedAt) / 1000),
         version: packageVersion,
         cache: { entries: digestCache.size, events: eventCache.size },
+        resources: {
+          rssMB: Number((process.memoryUsage().rss / 1048576).toFixed(1)),
+          heapUsedMB: Number((process.memoryUsage().heapUsed / 1048576).toFixed(1)),
+          caches: { digest: digestCache.size, events: eventCache.size, static: staticCache.size },
+          feedbackStored: stats.feedback || 0,
+        },
         stats,
       });
       return;
