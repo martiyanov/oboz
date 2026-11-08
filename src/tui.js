@@ -4,7 +4,7 @@ import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { enrichEvent } from './digest.js';
 import { isPassing } from './score.js';
-import { REGION_NAMES, plural } from './format.js';
+import { REGION_NAMES, plural, scoreLevel } from './format.js';
 import {
   formatTimeRu, formatDateTimeRu, timeAgoRu, truncate, wrapText,
 } from './util.js';
@@ -128,8 +128,8 @@ function renderHeader(state, extra = '') {
       `${S.bold}${demo ? S.magenta : S.cyan}`,
     ),
     segment(
-      `Источники ${digest.stats.sourcesOk}/${digest.stats.sourcesTotal} · публикаций ${digest.stats.articlesUsed} · ` +
-      `событий ${digest.stats.events} · прошло фильтр ${passed}` +
+      (digest.stats.demo ? 'Источники демо-набор' : `Источники ${digest.stats.sourcesOk}/${digest.stats.sourcesTotal}`) +
+      ` · публикаций ${digest.stats.articlesUsed} · событий ${digest.stats.events} · прошло фильтр ${passed}` +
       (extra ? ` · ${extra}` : ''),
       S.dim,
     ),
@@ -156,8 +156,8 @@ function renderList(state, height) {
       S.dim,
     ));
     segments.push(segment(''));
-    segments.push(segment('t — повысить порог, T — понизить · g — сменить регион · r — обновить', S.dim));
-    segments.push(segment(`Проверено источников: ${state.digest.stats.sourcesOk}/${state.digest.stats.sourcesTotal}`, S.dim));
+    segments.push(segment('T — понизить порог, чтобы увидеть больше · g — сменить регион · r — обновить', S.dim));
+    segments.push(segment(state.digest.stats.demo ? 'Источники: демо-набор (без сети)' : `Проверено источников: ${state.digest.stats.sourcesOk}/${state.digest.stats.sourcesTotal}`, S.dim));
     return [...segments, ...footer];
   }
 
@@ -199,7 +199,7 @@ function buildDossierBody(state, available) {
     push(title, `${S.bold}${S.cyan}`);
   };
 
-  push(...wrapText(event.summary || event.title, width - 2).slice(0, 4), S.dim);
+  for (const line of wrapText(event.summary || event.title, width - 2).slice(0, 4)) push(line, S.dim);
 
   section('ТЕЗИСЫ (Enter — разбор тезиса и его подтверждений)');
   if (!event.claims.length) push('— тезисы не выделены', S.dim);
@@ -282,7 +282,16 @@ function buildDossierBody(state, available) {
 
 function renderDossier(state, height) {
   const event = state.dossier;
-  const segments = [...renderHeader(state, state.loading ? 'обновляю…' : '')];
+  const width = Math.max(40, Math.min(process.stdout.columns || 100, 140));
+  const segments = [...renderHeader(state, state.loading ? 'обновляю…' : 'ДОСЬЕ')];
+  for (const line of wrapText(event.title, width - 2).slice(0, 2)) segments.push(segment(line, `${S.bold}${S.cyan}`));
+  segments.push(segment(
+    `Оценка ${event.score.toFixed(2)} · ${scoreLevel(event.score)} · ${event.domains.length} ` +
+    `${plural(event.domains.length, 'независимый источник', 'независимых источника', 'независимых источников')} · ` +
+    `достоверность ${event.confidence.toFixed(2)}`,
+    scoreColor(event.score),
+  ));
+  segments.push(segment(''));
   const footer = [
     segment(''),
     segment('↑↓ выбор · Enter открыть · o в браузере · r обновить · Esc назад · ? помощь · q выход', S.dim),
@@ -300,6 +309,7 @@ function renderClaim(state, height) {
   const claim = state.claim;
   const event = state.dossier;
   const segments = [...renderHeader(state, 'ТЕЗИС')];
+  segments.push(segment(truncate(event?.title || '', width - 2), S.dim));
   segments.push(segment(`«${truncate(claim.text, width - 4)}»`, S.bold));
   segments.push(segment(`Тип: ${KIND_LABEL[claim.kind] || claim.kind}` +
     (claim.numbers?.length ? ` · цифры: ${claim.numbers.map((n) => `${n.value} ${n.unit}`).join(', ')}` : ''), S.dim));

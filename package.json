@@ -9,8 +9,9 @@
   },
   "scripts": {
     "start": "node ./oboz",
-    "test": "node --test test/",
-    "sources": "node ./oboz sources"
+    "test": "node --test",
+    "sources": "node ./oboz sources",
+    "tui:smoke": "node scripts/tui-headless.mjs"
   },
   "engines": {
     "node": ">=20"

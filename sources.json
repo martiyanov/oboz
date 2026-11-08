@@ -11,7 +11,12 @@
       "region": "ru",
       "tier": "A",
       "type": "state-agency",
-      "topics": ["politics", "economy", "society", "world"],
+      "topics": [
+        "politics",
+        "economy",
+        "society",
+        "world"
+      ],
       "enabled": true
     },
     {
@@ -23,7 +28,12 @@
       "region": "ru",
       "tier": "A",
       "type": "state-agency",
-      "topics": ["politics", "economy", "society", "world"],
+      "topics": [
+        "politics",
+        "economy",
+        "society",
+        "world"
+      ],
       "enabled": true
     },
     {
@@ -35,7 +45,11 @@
       "region": "ru",
       "tier": "B",
       "type": "business",
-      "topics": ["economy", "politics", "society"],
+      "topics": [
+        "economy",
+        "politics",
+        "society"
+      ],
       "enabled": true
     },
     {
@@ -47,7 +61,11 @@
       "region": "ru",
       "tier": "B",
       "type": "business",
-      "topics": ["economy", "politics", "society"],
+      "topics": [
+        "economy",
+        "politics",
+        "society"
+      ],
       "enabled": true
     },
     {
@@ -59,7 +77,10 @@
       "region": "ru",
       "tier": "B",
       "type": "business",
-      "topics": ["economy", "politics"],
+      "topics": [
+        "economy",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -71,7 +92,11 @@
       "region": "ru",
       "tier": "B",
       "type": "state-affiliated",
-      "topics": ["society", "politics", "world"],
+      "topics": [
+        "society",
+        "politics",
+        "world"
+      ],
       "enabled": true
     },
     {
@@ -83,8 +108,12 @@
       "region": "ru",
       "tier": "B",
       "type": "state-affiliated",
-      "topics": ["politics", "society", "world"],
-      "enabled": false
+      "topics": [
+        "politics",
+        "society",
+        "world"
+      ],
+      "enabled": true
     },
     {
       "id": "rt-ru",
@@ -95,7 +124,10 @@
       "region": "ru",
       "tier": "C",
       "type": "state-affiliated",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -107,7 +139,11 @@
       "region": "ru",
       "tier": "C",
       "type": "state-affiliated",
-      "topics": ["politics", "society", "economy"],
+      "topics": [
+        "politics",
+        "society",
+        "economy"
+      ],
       "enabled": true
     },
     {
@@ -119,7 +155,11 @@
       "region": "ru",
       "tier": "B",
       "type": "independent",
-      "topics": ["politics", "society", "world"],
+      "topics": [
+        "politics",
+        "society",
+        "world"
+      ],
       "enabled": true
     },
     {
@@ -131,7 +171,10 @@
       "region": "ru",
       "tier": "B",
       "type": "independent",
-      "topics": ["society", "politics"],
+      "topics": [
+        "society",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -143,7 +186,11 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics", "society"],
+      "topics": [
+        "world",
+        "politics",
+        "society"
+      ],
       "enabled": true
     },
     {
@@ -155,7 +202,10 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -167,7 +217,11 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics", "society"],
+      "topics": [
+        "world",
+        "politics",
+        "society"
+      ],
       "enabled": true
     },
     {
@@ -179,7 +233,10 @@
       "region": "world",
       "tier": "B",
       "type": "foreign",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -191,7 +248,11 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics", "economy"],
+      "topics": [
+        "world",
+        "politics",
+        "economy"
+      ],
       "enabled": true
     },
     {
@@ -203,7 +264,10 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -215,7 +279,11 @@
       "region": "world",
       "tier": "B",
       "type": "foreign",
-      "topics": ["world", "politics", "economy"],
+      "topics": [
+        "world",
+        "politics",
+        "economy"
+      ],
       "enabled": true
     },
     {
@@ -227,7 +295,10 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     },
     {
@@ -239,7 +310,10 @@
       "region": "world",
       "tier": "A",
       "type": "foreign",
-      "topics": ["world", "politics"],
+      "topics": [
+        "world",
+        "politics"
+      ],
       "enabled": true
     }
   ]

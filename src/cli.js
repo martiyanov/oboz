@@ -9,6 +9,13 @@ import { runTui } from './tui.js';
 import { parseDuration, formatDateTimeRu } from './util.js';
 import { ROOT } from './paths.js';
 
+class UserError extends Error {
+  constructor(message) {
+    super(message);
+    this.isUserError = true;
+  }
+}
+
 const VALUE_FLAGS = new Set(['region', 'threshold', 'limit', 'every', 'cache-dir', 'width']);
 const REGIONS = ['ru', 'world', 'all'];
 
@@ -48,21 +55,21 @@ function parseThreshold(value) {
   if (value === undefined || value === true) return undefined;
   const num = Number(String(value).replace(',', '.'));
   if (!Number.isFinite(num) || num < 0 || num > 1) {
-    throw new Error('Порог должен быть числом от 0 до 1, например --threshold 0.55');
+    throw new UserError('Порог должен быть числом от 0 до 1, например --threshold 0.55');
   }
   return num;
 }
 
 function parseRegion(value, fallback) {
   if (value === undefined || value === true) return fallback;
-  if (!REGIONS.includes(value)) throw new Error(`Регион должен быть одним из: ${REGIONS.join(', ')}`);
+  if (!REGIONS.includes(value)) throw new UserError(`Регион должен быть одним из: ${REGIONS.join(', ')}`);
   return value;
 }
 
 function parseLimit(value, fallback) {
   if (value === undefined || value === true) return fallback;
   const num = Number(value);
-  if (!Number.isFinite(num) || num < 1) throw new Error('--limit должен быть положительным числом');
+  if (!Number.isFinite(num) || num < 1) throw new UserError('--limit должен быть положительным числом');
   return Math.floor(num);
 }
 
@@ -113,6 +120,8 @@ async function cmdNews(flags) {
   const region = parseRegion(flags.region, config.region);
   const threshold = parseThreshold(flags.threshold);
   const limit = parseLimit(flags.limit, config.limit);
+  const spinner = !flags.json && process.stderr.isTTY;
+  if (spinner) process.stderr.write('Загружаю ленты…\r');
   const digest = await buildDigest({
     region,
     threshold,
@@ -121,6 +130,12 @@ async function cmdNews(flags) {
     noCache: Boolean(flags['no-cache']),
     wiki: Boolean(flags.wiki),
   });
+  if (spinner) process.stderr.write('\r\x1b[K');
+
+  if (!digest.stats.demo && digest.stats.sourcesOk === 0) {
+    process.stderr.write('Не удалось загрузить ни один источник. Проверьте сеть: ./oboz sources --check\n');
+    return 2;
+  }
 
   if (flags.json) {
     const payload = {
@@ -180,7 +195,7 @@ async function cmdWatch(flags) {
   const everyMs = flags.every
     ? parseDuration(flags.every)
     : (config.refreshEveryMinutes || 60) * 60_000;
-  if (!everyMs) throw new Error('Не понял период --every. Примеры: 30s, 15m, 1h, 60m');
+  if (!everyMs) throw new UserError('Не понял период --every. Примеры: 30s, 15m, 1h, 60m');
   await runWatch({
     region,
     threshold,
@@ -233,7 +248,13 @@ async function cmdTui(flags) {
     demo: Boolean(flags.demo),
     noCache: Boolean(flags['no-cache']),
   };
+  if (process.stderr.isTTY) process.stderr.write('Загружаю ленты…\r');
   const digest = await buildDigest({ ...baseOptions, wiki: false });
+  if (process.stderr.isTTY) process.stderr.write('\r\x1b[K');
+  if (!digest.stats.demo && digest.stats.sourcesOk === 0) {
+    process.stderr.write('Не удалось загрузить ни один источник. Проверьте сеть: ./oboz sources --check\n');
+    return 2;
+  }
   return runTui({
     digest,
     config,
@@ -253,7 +274,7 @@ async function cmdVersion() {
   return 0;
 }
 
-export async function main(argv) {
+async function dispatch(argv) {
   const flags = parseArgs(argv);
   const command = String(flags._[0] || (flags.demo ? 'tui' : 'tui')).toLowerCase();
 
@@ -282,5 +303,19 @@ export async function main(argv) {
     default:
       process.stderr.write(`Неизвестная команда «${command}». Справка: oboz help\n`);
       return 2;
+  }
+}
+
+export async function main(argv) {
+  try {
+    return await dispatch(argv);
+  } catch (error) {
+    if (error?.isUserError) {
+      process.stderr.write(`${error.message}\n`);
+      return 2;
+    }
+    process.stderr.write(`Ошибка: ${error?.message || error}\n`);
+    if (process.env.OBOZ_DEBUG) process.stderr.write(`${error?.stack || ''}\n`);
+    return 1;
   }
 }

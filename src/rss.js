@@ -4,7 +4,8 @@ import path from 'node:path';
 import { htmlToText, domainOf, hashId, normalizeWord } from './util.js';
 import { RSS_CACHE_DIR } from './paths.js';
 
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) oboz/0.1 terminal news watcher';
+// Браузерный UA: часть сайтов (известия и др.) режет незнакомые клиенты через DDoS-Guard.
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 function tagContent(block, name) {
   const re = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i');
