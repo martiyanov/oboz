@@ -33,6 +33,14 @@
           <button type="button" class="region-button" data-region="world" aria-pressed="false" title="Мир">Мир</button>
           <button type="button" class="region-button" data-region="all" aria-pressed="false" title="Всё">Всё</button>
         </div>
+        <button type="button" class="icon-button interests-button" id="interests-button" aria-label="Мои интересы" title="Мои интересы">
+          <svg class="interests-glyph" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false">
+            <path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path>
+            <circle cx="15" cy="7" r="2.1"></circle>
+            <circle cx="9" cy="17" r="2.1"></circle>
+          </svg>
+          <span class="button-label">Интересы</span>
+        </button>
         <button type="button" class="icon-button bookmarks-button" id="bookmarks-button" aria-label="Закладки" title="Закладки">
           <svg class="bookmark-glyph" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1.1 5.9-5.3-2.9-5.3 2.9 1.1-5.9L3.5 9.7l5.9-.8Z"></path>
@@ -228,6 +236,11 @@
     </noscript>
   </main>
 
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span class="toast-text" id="toast-text"></span>
+    <button type="button" class="toast-undo" id="toast-undo" hidden>Вернуть</button>
+  </div>
+
   <footer class="app-footer">
     <p class="keyboard-hints">
       <kbd>↑</kbd><kbd>↓</kbd> / <kbd>j</kbd><kbd>k</kbd> — выбор ·
@@ -260,6 +273,61 @@
     </dl>
     <p class="help-note">Список обновляется сам раз в 60 секунд; в досье автообновление приостановлено.</p>
     <p class="help-note">Это терминальный фильтр, а не лента: показываются только события выше порога и с несколькими независимыми источниками.</p>
+  </dialog>
+
+  <dialog class="help-dialog interests-dialog" id="interests-dialog" aria-labelledby="interests-title">
+    <div class="help-head">
+      <h2 class="help-title" id="interests-title">МОИ ИНТЕРЕСЫ</h2>
+      <button type="button" class="help-close" id="interests-close" aria-label="Закрыть интересы">×</button>
+    </div>
+    <div class="interests-body">
+      <section class="interests-section">
+        <h3 class="interests-section-title">Синхронизация</h3>
+        <p class="interests-note">Код = доступ к профилю, не передавайте его посторонним.</p>
+        <div class="interests-sync-row">
+          <input class="interests-input interests-code" id="profile-code" type="password" readonly aria-label="Код синхронизации">
+          <button type="button" class="interests-small-button" id="profile-code-show">показать</button>
+          <button type="button" class="interests-small-button" id="profile-code-copy">копировать</button>
+        </div>
+        <div class="interests-sync-row">
+          <input class="interests-input" id="profile-connect-input" type="text" autocomplete="off" spellcheck="false" placeholder="код с другого устройства" aria-label="Код с другого устройства">
+          <button type="button" class="interests-small-button" id="profile-connect">подключить</button>
+        </div>
+        <p class="interests-status" id="sync-status" role="status"></p>
+      </section>
+
+      <section class="interests-section">
+        <h3 class="interests-section-title">Сортировка</h3>
+        <div class="interests-segmented">
+          <button type="button" id="sort-personal" aria-pressed="true">Для вас</button>
+          <button type="button" id="sort-score" aria-pressed="false">По рейтингу</button>
+        </div>
+        <p class="interests-note">«Для вас» учитывает лайки: темы, источники и слова заголовков.</p>
+      </section>
+
+      <section class="interests-section">
+        <h3 class="interests-section-title">Скрытые события</h3>
+        <div class="interests-list" id="hidden-events-list"></div>
+        <p class="empty-note" id="hidden-events-empty">Нет скрытых событий</p>
+      </section>
+
+      <section class="interests-section">
+        <h3 class="interests-section-title">Скрытые темы</h3>
+        <div class="interests-toggles" id="hidden-topics-list"></div>
+        <h4 class="interests-subtitle">Скрытые источники</h4>
+        <div class="interests-toggles interests-toggles-scroll" id="hidden-sources-list"></div>
+      </section>
+
+      <section class="interests-section">
+        <h3 class="interests-section-title">Выученные интересы</h3>
+        <div class="interests-learned" id="learned-list"></div>
+        <p class="empty-note" id="learned-empty">Пока нет выученных интересов</p>
+      </section>
+
+      <section class="interests-section interests-footer">
+        <button type="button" class="lower-button interests-reset" id="profile-reset">сбросить профиль</button>
+      </section>
+    </div>
   </dialog>
 
   <dialog class="help-dialog bookmarks-dialog" id="bookmarks-dialog" aria-labelledby="bookmarks-title">

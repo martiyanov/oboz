@@ -114,6 +114,21 @@
 `429` (лимит/слишком быстро), `413` (тело > 8 КБ). Сообщения сохраняются в
 `.state/feedback.jsonl`; публичного чтения нет, только `./oboz feedback` на сервере.
 
+### Профиль персонализации (анонимный)
+
+Синхронизация между устройствами без аккаунтов: клиент генерирует случайный токен (32 байта →
+hex) и хранит его локально; на сервере профиль лежит в `.state/profiles/<sha256(token)>.json`
+(0600, ≤64 КБ).
+
+- `GET /api/profile` — заголовок `X-Oboz-Profile: <token>`; ответ `{profile}` или 404.
+- `PUT /api/profile` — тело `{token, profile}`; ответ `{ok:true, updatedAt}`.
+- `DELETE /api/profile` — заголовок `X-Oboz-Profile`; ответ `{ok:true}`.
+
+Схема: `{version, likes[], dislikes[], hiddenEvents[{id,title,at}], hiddenTopics[], hiddenSources[],
+likedTopics{id:count}, likedSources{id:count}, likedKeywords{word:count}, sortMode, updatedAt}`.
+Токен — bearer-секрет: по нему открывается профиль, в URL его не передаём (только заголовок/тело).
+Сервер санитизирует поля и не отдаёт список профилей.
+
 ### `GET /healthz`
 
 `{ "ok": true, "uptimeSec": 123, "version": "0.4.0", "cache": {"entries":3,"events":1}, "resources": {"rssMB": 115.2, "heapUsedMB": 28.4, "caches": {"digest":3,"events":1,"static":2}, "feedCacheTtlSec": 1800, "feedbackStored": 4} }`

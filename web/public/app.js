@@ -61,6 +61,14 @@
   const MAX_SEEN_IDS = 300;
   const BOOKMARK_NOTIFICATION_TITLE = 'Новые новости по закладке';
   const BOOKMARK_NOTIFICATION_MIN_INTERVAL_MS = 60000;
+
+  const PROFILE_TOKEN_KEY = 'oboz-profile-token';
+  const PROFILE_KEY = 'oboz-profile-v1';
+  const PROFILE_SYNCED_KEY = 'oboz-profile-synced';
+  const PROFILE_PENDING_KEY = 'oboz-profile-pending';
+  const PROFILE_SAVE_DEBOUNCE_MS = 2000;
+  const PERSONAL_LIMIT = 30;
+  const PERSONAL_MAX_BOOST = 0.15;
   const BOOKMARK_STOP_WORDS = new Set([
     'в', 'во', 'и', 'на', 'после', 'по', 'с', 'со', 'из', 'от', 'до', 'за', 'под', 'над', 'при',
     'для', 'что', 'как', 'это', 'его', 'ее', 'её', 'их', 'был', 'была', 'было', 'были', 'будет',
@@ -93,6 +101,24 @@
     bookmarksSource: 'header',
     lastNotificationAt: 0,
     bookmarksReturnFocus: null,
+    passedEvents: [],
+    profile: null,
+    profileToken: null,
+    profileDirty: false,
+    profileSaveTimer: null,
+    profileSaving: false,
+    profileFlushing: false,
+    profileFlushKey: '',
+    profileFlushAt: 0,
+    profileServerState: 'local',
+    profileCodeVisible: false,
+    sourcesCatalog: null,
+    sourcesLoading: false,
+    hiddenCount: 0,
+    lastDigestLimit: 0,
+    toastTimer: null,
+    toastUndo: null,
+    interestsReturnFocus: null,
     view: 'list', // 'list' | 'detail'
     data: null,
     events: [],
@@ -254,6 +280,7 @@
     }
     if (state.category !== ALL_FILTER) parts.push(`тема «${optionLabel(state.categoryOptions, state.category)}»`);
     if (state.city !== ALL_FILTER) parts.push(`город «${optionLabel(state.cityOptions, state.city)}»`);
+    if (state.hiddenCount > 0) parts.push(`скрыто по вашим настройкам: ${state.hiddenCount}`);
     return parts.length ? ` · ${parts.join(' · ')}` : '';
   }
 
@@ -665,6 +692,1054 @@
     dom.saveBookmark.setAttribute('aria-label', saved ? 'Новость уже в закладках' : 'Сохранить новость в закладки');
   }
 
+  // ---------------------------------------------------------------------------
+  // Персонализация: профиль, лайки, скрытие, синхронизация
+  // ---------------------------------------------------------------------------
+
+  function createEmptyProfile() {
+    return {
+      version: 1,
+      likes: [],
+      dislikes: [],
+      hiddenEvents: [],
+      hiddenTopics: [],
+      hiddenSources: [],
+      likedTopics: {},
+      likedSources: {},
+      likedKeywords: {},
+      sortMode: 'personal',
+      updatedAt: null,
+    };
+  }
+
+  function uniqueStrings(value, limit) {
+    if (!Array.isArray(value)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const item of value) {
+      if (typeof item !== 'string') continue;
+      const text = item.trim().slice(0, 64);
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      out.push(text);
+      if (limit && out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function normalizeCountMap(value, keyLimit, maxEntries) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const out = {};
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+      if (Object.keys(out).length >= maxEntries) break;
+      const key = String(rawKey).trim().slice(0, keyLimit);
+      const count = Math.max(0, Math.min(999, Math.round(Number(rawValue) || 0)));
+      if (!key || !count) continue;
+      out[key] = count;
+    }
+    return out;
+  }
+
+  function normalizeProfile(raw) {
+    const profile = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const likes = uniqueStrings(profile.likes, 500);
+    const dislikes = uniqueStrings(profile.dislikes, 500);
+    const disagree = new Set(dislikes);
+    const hiddenEvents = [];
+    const seenHidden = new Set();
+    if (Array.isArray(profile.hiddenEvents)) {
+      for (const item of profile.hiddenEvents) {
+        if (!item || typeof item !== 'object') continue;
+        const id = typeof item.id === 'string' ? item.id.trim().slice(0, 64) : '';
+        if (!id || seenHidden.has(id)) continue;
+        seenHidden.add(id);
+        hiddenEvents.push({
+          id,
+          title: typeof item.title === 'string' ? item.title.slice(0, 300) : '',
+          at: typeof item.at === 'string' && item.at ? item.at : new Date().toISOString(),
+        });
+        if (hiddenEvents.length >= 300) break;
+      }
+    }
+    return {
+      version: 1,
+      likes: likes.filter((id) => !disagree.has(id)),
+      dislikes,
+      hiddenEvents,
+      hiddenTopics: uniqueStrings(profile.hiddenTopics, 100),
+      hiddenSources: uniqueStrings(profile.hiddenSources, 200),
+      likedTopics: normalizeCountMap(profile.likedTopics, 64, 60),
+      likedSources: normalizeCountMap(profile.likedSources, 64, 100),
+      likedKeywords: normalizeCountMap(profile.likedKeywords, 40, 100),
+      sortMode: profile.sortMode === 'score' ? 'score' : 'personal',
+      updatedAt: typeof profile.updatedAt === 'string' && profile.updatedAt ? profile.updatedAt : null,
+    };
+  }
+
+  function profileContentKey(profile) {
+    if (!profile) return 'null';
+    return JSON.stringify({
+      likes: profile.likes,
+      dislikes: profile.dislikes,
+      hiddenEvents: profile.hiddenEvents.map((item) => item.id),
+      hiddenTopics: profile.hiddenTopics,
+      hiddenSources: profile.hiddenSources,
+      likedTopics: profile.likedTopics,
+      likedSources: profile.likedSources,
+      likedKeywords: profile.likedKeywords,
+      sortMode: profile.sortMode,
+    });
+  }
+
+  function readStoredProfileToken() {
+    try {
+      const token = String(window.localStorage.getItem(PROFILE_TOKEN_KEY) || '').trim().toLowerCase();
+      return /^[a-f0-9]{32,128}$/.test(token) ? token : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function persistProfileToken(token) {
+    try {
+      if (token) window.localStorage.setItem(PROFILE_TOKEN_KEY, token);
+      else window.localStorage.removeItem(PROFILE_TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readProfileSyncedFlag() {
+    try {
+      return window.localStorage.getItem(PROFILE_SYNCED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function persistProfileSyncedFlag(value) {
+    try {
+      if (value) window.localStorage.setItem(PROFILE_SYNCED_KEY, '1');
+      else window.localStorage.removeItem(PROFILE_SYNCED_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readProfilePendingFlag() {
+    try {
+      return window.localStorage.getItem(PROFILE_PENDING_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function persistProfilePendingFlag(value) {
+    try {
+      if (value) window.localStorage.setItem(PROFILE_PENDING_KEY, '1');
+      else window.localStorage.removeItem(PROFILE_PENDING_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readStoredProfile() {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem(PROFILE_KEY) || 'null');
+      return raw ? normalizeProfile(raw) : createEmptyProfile();
+    } catch {
+      return createEmptyProfile();
+    }
+  }
+
+  function persistProfile() {
+    try {
+      window.localStorage.setItem(PROFILE_KEY, JSON.stringify(state.profile));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function generateProfileToken() {
+    const bytes = new Uint8Array(32);
+    try {
+      window.crypto.getRandomValues(bytes);
+    } catch {
+      for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function ensureProfileToken() {
+    if (state.profileToken && /^[a-f0-9]{32,128}$/.test(state.profileToken)) return state.profileToken;
+    const token = generateProfileToken();
+    state.profileToken = token;
+    persistProfileToken(token);
+    persistProfileSyncedFlag(false);
+    return token;
+  }
+
+  function hasPersonalSignals(profile) {
+    if (!profile) return false;
+    return profile.likes.length > 0
+      || Object.keys(profile.likedTopics).length > 0
+      || Object.keys(profile.likedSources).length > 0
+      || Object.keys(profile.likedKeywords).length > 0;
+  }
+
+  function hasHiddenRules(profile) {
+    if (!profile) return false;
+    return profile.hiddenEvents.length > 0 || profile.hiddenTopics.length > 0 || profile.hiddenSources.length > 0;
+  }
+
+  function isPersonalActive() {
+    const profile = state.profile;
+    if (!profile) return false;
+    if (hasHiddenRules(profile)) return true;
+    return profile.sortMode === 'personal' && hasPersonalSignals(profile);
+  }
+
+  function isPersonalSorting() {
+    const profile = state.profile;
+    return Boolean(profile && profile.sortMode === 'personal' && hasPersonalSignals(profile));
+  }
+
+  function currentDigestLimit() {
+    return isPersonalActive() ? PERSONAL_LIMIT : EVENTS_LIMIT;
+  }
+
+  function eventSourceIds(event) {
+    const ids = [];
+    const seen = new Set();
+    const articles = Array.isArray(event.articles) ? event.articles : [];
+    for (const article of articles) {
+      const id = article && typeof article.sourceId === 'string' ? article.sourceId.trim() : '';
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  function profileTitleWords(title) {
+    const cleaned = String(title || '')
+      .toLowerCase()
+      .replace(/[«»„“”"'’`()[\]{}.,;:!?—–\-/\\|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const words = [];
+    const seen = new Set();
+    for (const word of cleaned.split(' ')) {
+      if (!word || word.length < 3 || seen.has(word) || /^\d+$/.test(word)) continue;
+      if (BOOKMARK_STOP_WORDS.has(word)) continue;
+      seen.add(word);
+      words.push(word);
+    }
+    return words;
+  }
+
+  function isEventLiked(event) {
+    return Boolean(state.profile && event && state.profile.likes.includes(String(event.id)));
+  }
+
+  function isEventDisliked(event) {
+    return Boolean(state.profile && event && state.profile.dislikes.includes(String(event.id)));
+  }
+
+  function isEventHidden(event) {
+    const profile = state.profile;
+    if (!profile || !event) return false;
+    const id = String(event.id || '');
+    if (profile.hiddenEvents.some((item) => String(item.id) === id)) return true;
+    const topics = Array.isArray(event.topics) ? event.topics : [];
+    if (topics.some((topic) => profile.hiddenTopics.includes(String(topic)))) return true;
+    const sources = eventSourceIds(event);
+    return sources.some((sourceId) => profile.hiddenSources.includes(sourceId));
+  }
+
+  function boostForEvent(event) {
+    const profile = state.profile;
+    if (!profile) return 0;
+    let boost = 0;
+    const topics = Array.isArray(event.topics) ? event.topics : [];
+    for (const topic of topics) boost += 2 * (profile.likedTopics[String(topic)] || 0);
+    for (const sourceId of eventSourceIds(event)) boost += profile.likedSources[sourceId] || 0;
+    for (const word of profileTitleWords(event.title)) boost += profile.likedKeywords[word] || 0;
+    return boost;
+  }
+
+  function personalScore(event) {
+    const base = Number(event.score);
+    const safeBase = Number.isFinite(base) ? base : 0;
+    return safeBase + Math.min(PERSONAL_MAX_BOOST, boostForEvent(event) * 0.02);
+  }
+
+  function refreshEventsFromProfile() {
+    const source = Array.isArray(state.passedEvents) ? state.passedEvents : [];
+    const personal = isPersonalSorting();
+    const list = [];
+    let hidden = 0;
+    for (const event of source) {
+      if (!event) continue;
+      if (isEventHidden(event)) {
+        hidden += 1;
+        continue;
+      }
+      const score = Number(event.score);
+      const baseScore = Number.isFinite(score) ? score : 0;
+      list.push({
+        event,
+        order: personal ? personalScore(event) : baseScore,
+        baseScore,
+        latest: Number(event.latestAt) || 0,
+      });
+    }
+    list.sort((left, right) => (
+      right.order - left.order
+      || right.baseScore - left.baseScore
+      || right.latest - left.latest
+    ));
+    state.events = list.map((item) => item.event);
+    state.hiddenCount = hidden;
+    if (state.selectedIndex >= state.events.length) state.selectedIndex = Math.max(0, state.events.length - 1);
+    if (state.selectedIndex < 0) state.selectedIndex = 0;
+  }
+
+  function findEventById(id) {
+    const value = String(id || '');
+    if (!value) return null;
+    if (state.detail && String(state.detail.id) === value) return state.detail;
+    const visible = state.events.find((event) => String(event.id) === value);
+    if (visible) return visible;
+    return state.passedEvents.find((event) => String(event.id) === value) || null;
+  }
+
+  function adjustCount(map, key, delta) {
+    if (!key) return;
+    const current = Number(map[key]) || 0;
+    const next = Math.max(0, current + delta);
+    if (!next) delete map[key];
+    else map[key] = Math.min(999, next);
+  }
+
+  function learnFromEvent(event, delta) {
+    const profile = state.profile;
+    if (!profile || !event) return;
+    const topics = Array.isArray(event.topics) ? event.topics : [];
+    for (const topic of topics) adjustCount(profile.likedTopics, String(topic), delta);
+    for (const sourceId of eventSourceIds(event)) adjustCount(profile.likedSources, sourceId, delta);
+    for (const word of keywordsFromTitle(event.title)) adjustCount(profile.likedKeywords, word, delta);
+  }
+
+  function scheduleProfileSave() {
+    state.profile.updatedAt = new Date().toISOString();
+    persistProfile();
+    persistProfilePendingFlag(true);
+    state.profileDirty = true;
+    state.profileServerState = 'pending';
+    ensureProfileToken();
+    if (state.profileSaveTimer) window.clearTimeout(state.profileSaveTimer);
+    state.profileSaveTimer = window.setTimeout(() => {
+      state.profileSaveTimer = null;
+      saveProfileNow();
+    }, PROFILE_SAVE_DEBOUNCE_MS);
+    refreshSyncStatus();
+  }
+
+  async function saveProfileNow() {
+    if (!state.profileToken || state.profileSaving) return;
+    const token = state.profileToken;
+    const snapshot = state.profile;
+    persistProfilePendingFlag(true);
+    state.profileSaving = true;
+    refreshSyncStatus();
+    let saved = false;
+    try {
+      const response = await fetch('api/profile', {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Oboz-Profile': token,
+        },
+        body: JSON.stringify({ token, profile: snapshot }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      saved = true;
+      persistProfileSyncedFlag(true);
+      persistProfilePendingFlag(false);
+      state.profileServerState = 'synced';
+      state.profileDirty = profileContentKey(state.profile) !== profileContentKey(snapshot);
+    } catch {
+      persistProfilePendingFlag(false);
+      state.profileServerState = 'offline';
+      state.profileDirty = true;
+    } finally {
+      state.profileSaving = false;
+      refreshSyncStatus();
+      if (saved && state.profileDirty) scheduleProfileSave();
+    }
+  }
+
+  /* Немедленно отправляем накопленный профиль (PUT keepalive), отменяя debounce.
+     Вызывается при уходе со страницы, открытии «Интересов» и перед подключением. */
+  function flushProfileSave(options) {
+    const opts = Object.assign({ force: false, keepalive: true }, options || {});
+    if (state.profileSaveTimer) {
+      window.clearTimeout(state.profileSaveTimer);
+      state.profileSaveTimer = null;
+    }
+    if (!state.profileToken) return false;
+    const key = profileContentKey(state.profile);
+    if (!opts.force && !state.profileDirty && readProfileSyncedFlag() && !state.profileFlushing) {
+      refreshSyncStatus();
+      return false;
+    }
+    if (!opts.force && state.profileFlushKey === key && Date.now() - state.profileFlushAt < 1500) {
+      return false;
+    }
+    state.profileFlushKey = key;
+    state.profileFlushAt = Date.now();
+    const token = state.profileToken;
+    const snapshot = state.profile;
+    persistProfilePendingFlag(true);
+    state.profileFlushing = true;
+    refreshSyncStatus();
+    let request;
+    try {
+      request = fetch('api/profile', {
+        method: 'PUT',
+        keepalive: Boolean(opts.keepalive),
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Oboz-Profile': token,
+        },
+        body: JSON.stringify({ token, profile: snapshot }),
+      });
+    } catch {
+      state.profileFlushing = false;
+      state.profileServerState = 'offline';
+      state.profileDirty = true;
+      persistProfilePendingFlag(false);
+      refreshSyncStatus();
+      return false;
+    }
+    request
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        persistProfileSyncedFlag(true);
+        persistProfilePendingFlag(false);
+        state.profileServerState = 'synced';
+        state.profileDirty = profileContentKey(state.profile) !== profileContentKey(snapshot);
+        state.profileFlushing = false;
+        refreshSyncStatus();
+        if (state.profileDirty) scheduleProfileSave();
+      })
+      .catch(() => {
+        persistProfilePendingFlag(false);
+        state.profileFlushing = false;
+        state.profileServerState = 'offline';
+        state.profileDirty = true;
+        refreshSyncStatus();
+      });
+    return true;
+  }
+
+  async function loadServerProfile() {
+    const token = state.profileToken;
+    if (!token) return;
+    state.profileServerState = 'loading';
+    refreshSyncStatus();
+    try {
+      const response = await fetch('api/profile', {
+        cache: 'no-store',
+        headers: { 'X-Oboz-Profile': token },
+      });
+      if (response.status === 404) {
+        persistProfileSyncedFlag(false);
+        persistProfilePendingFlag(false);
+        state.profileServerState = 'local';
+        refreshSyncStatus();
+        if (profileContentKey(state.profile) !== profileContentKey(createEmptyProfile())) {
+          flushProfileSave({ force: true });
+        }
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      persistProfileSyncedFlag(true);
+      persistProfilePendingFlag(false);
+      state.profileServerState = 'synced';
+      const payload = await response.json();
+      const remote = normalizeProfile(payload && payload.profile);
+      const before = profileContentKey(state.profile);
+      const merged = mergeProfiles(state.profile, remote);
+      state.profile = merged;
+      persistProfile();
+      state.profileServerState = 'synced';
+      if (profileContentKey(merged) !== before) {
+        refreshEventsFromProfile();
+        updateHeader();
+        if (state.view === 'list') renderList();
+        if (state.detail) updateDetailVoteButtons();
+        if (dom.interestsDialog && dom.interestsDialog.open) renderInterestsDialog();
+      }
+      refreshSyncStatus();
+      ensurePersonalLimit();
+      if (profileContentKey(merged) !== profileContentKey(remote)) {
+        flushProfileSave({ force: true });
+      }
+    } catch {
+      state.profileServerState = 'offline';
+      refreshSyncStatus();
+    }
+  }
+
+  function mergeProfiles(localRaw, remoteRaw) {
+    const local = normalizeProfile(localRaw);
+    const remote = normalizeProfile(remoteRaw);
+    const dislikes = uniqueStrings(local.dislikes.concat(remote.dislikes), 500);
+    const disagree = new Set(dislikes);
+    const likes = uniqueStrings(local.likes.concat(remote.likes), 500).filter((id) => !disagree.has(id));
+    const hiddenEvents = [];
+    const hiddenSeen = new Set();
+    for (const item of local.hiddenEvents.concat(remote.hiddenEvents)) {
+      if (hiddenSeen.has(item.id)) continue;
+      hiddenSeen.add(item.id);
+      hiddenEvents.push(item);
+      if (hiddenEvents.length >= 300) break;
+    }
+    const mergeCounts = (left, right) => {
+      const out = {};
+      for (const key of new Set(Object.keys(left).concat(Object.keys(right)))) {
+        out[key] = Math.max(Number(left[key]) || 0, Number(right[key]) || 0);
+        if (!out[key]) delete out[key];
+      }
+      return out;
+    };
+    const localTime = Date.parse(local.updatedAt || '') || 0;
+    const remoteTime = Date.parse(remote.updatedAt || '') || 0;
+    return {
+      version: 1,
+      likes,
+      dislikes,
+      hiddenEvents,
+      hiddenTopics: uniqueStrings(local.hiddenTopics.concat(remote.hiddenTopics), 100),
+      hiddenSources: uniqueStrings(local.hiddenSources.concat(remote.hiddenSources), 200),
+      likedTopics: mergeCounts(local.likedTopics, remote.likedTopics),
+      likedSources: mergeCounts(local.likedSources, remote.likedSources),
+      likedKeywords: mergeCounts(local.likedKeywords, remote.likedKeywords),
+      sortMode: remoteTime >= localTime ? remote.sortMode : local.sortMode,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function ensurePersonalLimit() {
+    if (!state.data || state.loading) return;
+    if (state.lastDigestLimit !== currentDigestLimit()) {
+      loadDigest({ silent: true, reason: 'profile-limit' });
+    }
+  }
+
+  function setSyncStatus(text, kind) {
+    if (!dom.syncStatus) return;
+    dom.syncStatus.textContent = text || '';
+    dom.syncStatus.classList.remove('is-error', 'is-ok');
+    if (kind === 'error') dom.syncStatus.classList.add('is-error');
+    else if (kind === 'ok') dom.syncStatus.classList.add('is-ok');
+  }
+
+  function refreshSyncStatus() {
+    if (!dom.syncStatus) return;
+    if (!state.profileToken) {
+      setSyncStatus('Только локально: профиль ещё не отправлен на сервер.');
+      return;
+    }
+    if (state.profileFlushing || state.profileSaving) {
+      setSyncStatus('Сохранено локально, отправляю на сервер…');
+      return;
+    }
+    if (state.profileServerState === 'loading') {
+      setSyncStatus('Проверяю профиль на сервере…');
+      return;
+    }
+    if (state.profileServerState === 'offline') {
+      setSyncStatus('Только локально: сервер недоступен. Повторим при следующем изменении.', 'error');
+      return;
+    }
+    if (state.profileServerState === 'synced' && readProfileSyncedFlag() && !state.profileDirty) {
+      setSyncStatus('Сохранено на сервере.');
+      return;
+    }
+    if (state.profileDirty) {
+      setSyncStatus('Только локально: изменения ещё не на сервере.');
+      return;
+    }
+    if (readProfileSyncedFlag()) {
+      setSyncStatus('Сохранено на сервере.');
+      return;
+    }
+    setSyncStatus('Только локально: профиль ещё не отправлен на сервер.');
+  }
+
+  function showToast(message, undoHandler) {
+    if (!dom.toast) return;
+    if (state.toastTimer) window.clearTimeout(state.toastTimer);
+    state.toastUndo = typeof undoHandler === 'function' ? undoHandler : null;
+    dom.toastText.textContent = message;
+    dom.toastUndo.hidden = !state.toastUndo;
+    dom.toast.hidden = false;
+    state.toastTimer = window.setTimeout(() => {
+      state.toastTimer = null;
+      state.toastUndo = null;
+      dom.toast.hidden = true;
+    }, 6000);
+  }
+
+  function hideToast() {
+    if (state.toastTimer) {
+      window.clearTimeout(state.toastTimer);
+      state.toastTimer = null;
+    }
+    state.toastUndo = null;
+    if (dom.toast) dom.toast.hidden = true;
+  }
+
+  function createVoteButton(event, voteType) {
+    const active = voteType === 'like' ? isEventLiked(event) : isEventDisliked(event);
+    const button = el('button', 'vote-button', voteType === 'like' ? '👍' : '👎');
+    button.type = 'button';
+    button.dataset.vote = voteType;
+    button.dataset.eventId = String(event.id || '');
+    button.dataset.testid = voteType === 'like' ? 'event-like' : 'event-dislike';
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('aria-label', voteType === 'like'
+      ? (active ? 'Убрать отметку «нравится»' : 'Нравится')
+      : (active ? 'Убрать отметку «не интересно»' : 'Не интересно'));
+    button.title = voteType === 'like' ? 'Нравится' : 'Не интересно';
+    return button;
+  }
+
+  function updateButtonVoteState(button, event, voteType) {
+    const active = voteType === 'like' ? isEventLiked(event) : isEventDisliked(event);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('aria-label', voteType === 'like'
+      ? (active ? 'Убрать отметку «нравится»' : 'Нравится')
+      : (active ? 'Убрать отметку «не интересно»' : 'Не интересно'));
+  }
+
+  function updateDetailVoteButtons() {
+    if (!dom.detailContent || !state.detail) return;
+    const buttons = dom.detailContent.querySelectorAll('[data-vote]');
+    buttons.forEach((button) => {
+      updateButtonVoteState(button, state.detail, button.dataset.vote);
+    });
+  }
+
+  function handleVote(event, voteType) {
+    if (!event || !event.id || !state.profile) return;
+    const id = String(event.id);
+    if (voteType === 'like') {
+      const liked = state.profile.likes.includes(id);
+      if (liked) {
+        state.profile.likes = state.profile.likes.filter((item) => item !== id);
+        learnFromEvent(event, -1);
+        setStatus('лайк снят');
+      } else {
+        state.profile.dislikes = state.profile.dislikes.filter((item) => item !== id);
+        state.profile.hiddenEvents = state.profile.hiddenEvents.filter((item) => String(item.id) !== id);
+        state.profile.likes = uniqueStrings(state.profile.likes.concat([id]), 500);
+        learnFromEvent(event, 1);
+        setStatus('добавлено в интересы — порядок «Для вас» учтёт это');
+      }
+      scheduleProfileSave();
+      refreshEventsFromProfile();
+      updateHeader();
+      updateStatusLine();
+      if (state.view === 'list') renderList();
+      else updateDetailVoteButtons();
+      if (dom.interestsDialog && dom.interestsDialog.open) renderInterestsDialog();
+      ensurePersonalLimit();
+      return;
+    }
+
+    // 👎: полностью скрываем событие.
+    if (state.profile.likes.includes(id)) {
+      state.profile.likes = state.profile.likes.filter((item) => item !== id);
+      learnFromEvent(event, -1);
+    }
+    if (!state.profile.dislikes.includes(id)) {
+      state.profile.dislikes = uniqueStrings(state.profile.dislikes.concat([id]), 500);
+    }
+    if (!state.profile.hiddenEvents.some((item) => String(item.id) === id)) {
+      state.profile.hiddenEvents = state.profile.hiddenEvents.concat([{
+        id,
+        title: String(event.title || '').slice(0, 300),
+        at: new Date().toISOString(),
+      }]).slice(-300);
+    }
+    scheduleProfileSave();
+    const wasDetail = state.view === 'detail';
+    refreshEventsFromProfile();
+    updateHeader();
+    updateStatusLine();
+    if (wasDetail) {
+      leaveDetailToList();
+      syncUrl();
+      renderList();
+    } else {
+      renderList();
+    }
+    if (dom.interestsDialog && dom.interestsDialog.open) renderInterestsDialog();
+    showToast('Скрыто по вашим настройкам', () => {
+      state.profile.hiddenEvents = state.profile.hiddenEvents.filter((item) => String(item.id) !== id);
+      state.profile.dislikes = state.profile.dislikes.filter((item) => item !== id);
+      scheduleProfileSave();
+      refreshEventsFromProfile();
+      updateHeader();
+      if (state.view === 'list') renderList();
+      hideToast();
+    });
+    ensurePersonalLimit();
+  }
+
+  function unhideEvent(id) {
+    const value = String(id);
+    state.profile.hiddenEvents = state.profile.hiddenEvents.filter((item) => String(item.id) !== value);
+    state.profile.dislikes = state.profile.dislikes.filter((item) => item !== value);
+    scheduleProfileSave();
+    refreshEventsFromProfile();
+    updateHeader();
+    updateStatusLine();
+    if (state.view === 'list') renderList();
+    if (dom.interestsDialog && dom.interestsDialog.open) renderInterestsDialog();
+    setSyncStatus('Событие возвращено в ленту.', 'ok');
+  }
+
+  function setHiddenTopic(topic, hidden) {
+    const id = String(topic);
+    if (hidden) {
+      if (!state.profile.hiddenTopics.includes(id)) state.profile.hiddenTopics.push(id);
+    } else {
+      state.profile.hiddenTopics = state.profile.hiddenTopics.filter((item) => item !== id);
+    }
+    scheduleProfileSave();
+    refreshEventsFromProfile();
+    updateHeader();
+    updateStatusLine();
+    if (state.view === 'list') renderList();
+    ensurePersonalLimit();
+    renderInterestsDialog();
+  }
+
+  function setHiddenSource(sourceId, hidden) {
+    const id = String(sourceId);
+    if (hidden) {
+      if (!state.profile.hiddenSources.includes(id)) state.profile.hiddenSources.push(id);
+    } else {
+      state.profile.hiddenSources = state.profile.hiddenSources.filter((item) => item !== id);
+    }
+    scheduleProfileSave();
+    refreshEventsFromProfile();
+    updateHeader();
+    updateStatusLine();
+    if (state.view === 'list') renderList();
+    ensurePersonalLimit();
+    renderInterestsDialog();
+  }
+
+  function setSortMode(mode) {
+    if (mode !== 'personal' && mode !== 'score') return;
+    if (state.profile.sortMode === mode) return;
+    state.profile.sortMode = mode;
+    scheduleProfileSave();
+    refreshEventsFromProfile();
+    updateHeader();
+    updateStatusLine();
+    if (state.view === 'list') renderList();
+    ensurePersonalLimit();
+    renderInterestsDialog();
+    setSyncStatus(mode === 'personal' ? 'Порядок «Для вас».' : 'Порядок по рейтингу.', 'ok');
+  }
+
+  async function loadSourcesCatalog() {
+    if (state.sourcesCatalog || state.sourcesLoading) return;
+    state.sourcesLoading = true;
+    try {
+      const response = await fetch('api/sources', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      state.sourcesCatalog = Array.isArray(payload.sources)
+        ? payload.sources.filter((source) => source && typeof source.id === 'string')
+        : [];
+    } catch {
+      state.sourcesCatalog = [];
+    } finally {
+      state.sourcesLoading = false;
+      if (dom.interestsDialog && dom.interestsDialog.open) renderInterestsDialog();
+    }
+  }
+
+  function sourceLabel(sourceId) {
+    const id = String(sourceId || '');
+    if (Array.isArray(state.sourcesCatalog)) {
+      const found = state.sourcesCatalog.find((source) => source.id === id);
+      if (found) return found.name || id;
+    }
+    return id;
+  }
+
+  function renderHiddenEventsList() {
+    if (!dom.hiddenEventsList) return;
+    clearNode(dom.hiddenEventsList);
+    const events = state.profile.hiddenEvents.slice().reverse();
+    if (dom.hiddenEventsEmpty) dom.hiddenEventsEmpty.hidden = events.length > 0;
+    events.forEach((item) => {
+      const row = el('div', 'hidden-event-item');
+      row.dataset.testid = 'hidden-event-item';
+      row.append(el('span', 'hidden-event-title', item.title || item.id));
+      const button = el('button', 'hidden-event-return', 'вернуть');
+      button.type = 'button';
+      button.dataset.unhideEvent = item.id;
+      button.dataset.testid = 'hidden-event-return';
+      button.setAttribute('aria-label', `Вернуть событие «${item.title || item.id}»`);
+      row.append(button);
+      dom.hiddenEventsList.append(row);
+    });
+  }
+
+  function renderHiddenTopicToggles() {
+    if (!dom.hiddenTopicsList) return;
+    clearNode(dom.hiddenTopicsList);
+    const options = state.categoryOptions.filter((option) => option.id !== ALL_FILTER);
+    const known = new Set(options.map((option) => option.id));
+    const extras = state.profile.hiddenTopics.filter((id) => !known.has(id)).map((id) => ({ id, label: id }));
+    const all = options.concat(extras);
+    if (!all.length) {
+      dom.hiddenTopicsList.append(el('p', 'empty-note', 'Темы пока не загружены.'));
+      return;
+    }
+    all.forEach((option) => {
+      const label = el('label', 'interests-toggle');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = option.id;
+      input.checked = state.profile.hiddenTopics.includes(option.id);
+      input.dataset.hiddenTopic = option.id;
+      label.append(input, el('span', 'interests-toggle-label', option.label));
+      dom.hiddenTopicsList.append(label);
+    });
+  }
+
+  function renderHiddenSourceToggles() {
+    if (!dom.hiddenSourcesList) return;
+    clearNode(dom.hiddenSourcesList);
+    if (state.sourcesLoading) {
+      dom.hiddenSourcesList.append(el('p', 'empty-note', 'Загружаю источники…'));
+      return;
+    }
+    const sources = Array.isArray(state.sourcesCatalog) ? state.sourcesCatalog : [];
+    const known = new Set(sources.map((source) => source.id));
+    const extras = state.profile.hiddenSources.filter((id) => !known.has(id)).map((id) => ({ id, name: id }));
+    const all = sources.concat(extras).sort((left, right) => String(left.name || left.id).localeCompare(String(right.name || right.id), 'ru'));
+    if (!all.length) {
+      dom.hiddenSourcesList.append(el('p', 'empty-note', 'Источники не загрузились.'));
+      return;
+    }
+    all.forEach((source) => {
+      const label = el('label', 'interests-toggle');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = source.id;
+      input.checked = state.profile.hiddenSources.includes(source.id);
+      input.dataset.hiddenSource = source.id;
+      label.append(input, el('span', 'interests-toggle-label', source.name || source.id));
+      dom.hiddenSourcesList.append(label);
+    });
+  }
+
+  function learnedEntries(counts, limit) {
+    return Object.entries(counts)
+      .filter(([, count]) => Number(count) > 0)
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, limit);
+  }
+
+  function renderLearnedInterests() {
+    if (!dom.learnedList) return;
+    clearNode(dom.learnedList);
+    const groups = [
+      {
+        label: 'темы',
+        entries: learnedEntries(state.profile.likedTopics, 8).map(([id, count]) => ({ label: optionLabel(state.categoryOptions, id), count })),
+      },
+      {
+        label: 'источники',
+        entries: learnedEntries(state.profile.likedSources, 8).map(([id, count]) => ({ label: sourceLabel(id), count })),
+      },
+      {
+        label: 'слова',
+        entries: learnedEntries(state.profile.likedKeywords, 8).map(([id, count]) => ({ label: id, count })),
+      },
+    ].filter((group) => group.entries.length);
+    if (dom.learnedEmpty) dom.learnedEmpty.hidden = groups.length > 0;
+    groups.forEach((group) => {
+      const row = el('div', 'learned-group');
+      row.append(el('span', 'learned-group-label', group.label));
+      group.entries.forEach((entry) => {
+        const item = el('span', 'learned-item', entry.label);
+        item.append(el('span', 'learned-item-count', ` ${entry.count}`));
+        row.append(item);
+      });
+      dom.learnedList.append(row);
+    });
+  }
+
+  function renderInterestsDialog() {
+    if (!dom.interestsDialog) return;
+    if (dom.profileCode) {
+      dom.profileCode.value = state.profileToken || '';
+      dom.profileCode.type = state.profileCodeVisible ? 'text' : 'password';
+    }
+    if (dom.profileCodeShow) dom.profileCodeShow.textContent = state.profileCodeVisible ? 'скрыть' : 'показать';
+    if (dom.sortPersonal) dom.sortPersonal.setAttribute('aria-pressed', state.profile.sortMode === 'personal' ? 'true' : 'false');
+    if (dom.sortScore) dom.sortScore.setAttribute('aria-pressed', state.profile.sortMode === 'score' ? 'true' : 'false');
+    renderHiddenEventsList();
+    renderHiddenTopicToggles();
+    renderHiddenSourceToggles();
+    renderLearnedInterests();
+    refreshSyncStatus();
+  }
+
+  function openInterestsDialog() {
+    if (!dom.interestsDialog) return;
+    const hadToken = Boolean(state.profileToken);
+    ensureProfileToken();
+    if (hadToken) flushProfileSave();
+    renderInterestsDialog();
+    if (!dom.interestsDialog.open) {
+      state.interestsReturnFocus = document.activeElement;
+      try {
+        dom.interestsDialog.showModal();
+      } catch {
+        dom.interestsDialog.setAttribute('open', '');
+      }
+    }
+    if (dom.interestsClose) dom.interestsClose.focus();
+    loadSourcesCatalog();
+  }
+
+  function closeInterestsDialog() {
+    if (!dom.interestsDialog) return;
+    if (dom.interestsDialog.open) dom.interestsDialog.close();
+    else dom.interestsDialog.removeAttribute('open');
+  }
+
+  function toggleProfileCodeVisibility() {
+    state.profileCodeVisible = !state.profileCodeVisible;
+    if (dom.profileCode) dom.profileCode.type = state.profileCodeVisible ? 'text' : 'password';
+    if (dom.profileCodeShow) dom.profileCodeShow.textContent = state.profileCodeVisible ? 'скрыть' : 'показать';
+  }
+
+  async function copyProfileCode() {
+    const token = ensureProfileToken();
+    if (dom.profileCode) dom.profileCode.value = token;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(token);
+        setSyncStatus('Код скопирован.', 'ok');
+        return;
+      }
+      throw new Error('clipboard unavailable');
+    } catch {
+      try {
+        if (dom.profileCode) {
+          dom.profileCode.type = 'text';
+          state.profileCodeVisible = true;
+          dom.profileCode.select();
+        }
+        const copied = document.execCommand('copy');
+        setSyncStatus(copied ? 'Код скопирован.' : 'Скопируйте код вручную.', copied ? 'ok' : 'error');
+      } catch {
+        setSyncStatus('Не удалось скопировать код — выделите его вручную.', 'error');
+      }
+    }
+  }
+
+  async function connectProfileByCode() {
+    const input = dom.profileConnectInput;
+    const code = String(input && input.value ? input.value : '').trim().toLowerCase();
+    if (!/^[a-f0-9]{32,128}$/.test(code)) {
+      setSyncStatus('Некорректный код — нужен 32–128 hex-символов.', 'error');
+      return;
+    }
+    flushProfileSave();
+    setSyncStatus('Подключаю профиль с другого устройства…');
+    try {
+      const response = await fetch('api/profile', {
+        cache: 'no-store',
+        headers: { 'X-Oboz-Profile': code },
+      });
+      if (response.status === 404) {
+        setSyncStatus('Код не найден на сервере.', 'error');
+        return;
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      persistProfileSyncedFlag(true);
+      const payload = await response.json();
+      const remote = normalizeProfile(payload && payload.profile);
+      state.profile = mergeProfiles(state.profile, remote);
+      state.profileToken = code;
+      persistProfileToken(code);
+      persistProfile();
+      state.profileServerState = 'synced';
+      refreshEventsFromProfile();
+      updateHeader();
+      if (state.view === 'list') renderList();
+      if (state.detail) updateDetailVoteButtons();
+      renderInterestsDialog();
+      setSyncStatus('Профиль подключён.', 'ok');
+      await saveProfileNow();
+      ensurePersonalLimit();
+    } catch {
+      setSyncStatus('Не удалось подключить профиль — проверьте сеть и код.', 'error');
+    }
+  }
+
+  async function resetProfile() {
+    const oldToken = state.profileToken;
+    if (state.profileSaveTimer) {
+      window.clearTimeout(state.profileSaveTimer);
+      state.profileSaveTimer = null;
+    }
+    state.profile = createEmptyProfile();
+    state.profileToken = null;
+    state.profileDirty = false;
+    state.profileSaving = false;
+    state.profileServerState = 'local';
+    persistProfileToken(null);
+    persistProfileSyncedFlag(false);
+    persistProfile();
+    refreshEventsFromProfile();
+    updateHeader();
+    if (state.view === 'list') renderList();
+    if (state.detail) updateDetailVoteButtons();
+    renderInterestsDialog();
+    setSyncStatus('Профиль сброшен. Новый код появится после следующего действия.', 'ok');
+    if (oldToken) {
+      try {
+        await fetch('api/profile', {
+          method: 'DELETE',
+          cache: 'no-store',
+          headers: { 'X-Oboz-Profile': oldToken },
+        });
+      } catch {
+        /* локально уже сброшено */
+      }
+    }
+    ensurePersonalLimit();
+  }
+
   function formatNumberValue(value, unit) {
     const text = String(value === undefined || value === null ? '' : value).replace('.', ',');
     const suffix = unit ? ` ${unit}` : '';
@@ -1048,10 +2123,13 @@
       setStatus(opts.refresh ? 'обновляю сводку — сервер пересчитывает ленты…' : 'загружаю сводку…');
     }
 
+    const requestedLimit = currentDigestLimit();
+    state.lastDigestLimit = requestedLimit;
+
     const params = new URLSearchParams();
     params.set('region', requestedRegion);
     params.set('threshold', requestedThreshold.toFixed(2));
-    params.set('limit', String(EVENTS_LIMIT));
+    params.set('limit', String(requestedLimit));
     params.set('category', requestedCategory);
     params.set('city', requestedCity);
     if (requestedQuery.length) params.set('q', requestedQuery.join(','));
@@ -1074,6 +2152,9 @@
         dom.refreshButton.classList.remove('is-loading');
         dom.eventList.setAttribute('aria-busy', 'false');
         if (!state.data && dom.eventList.hidden) dom.listSkeleton.hidden = true;
+        if (state.data && state.lastDigestLimit !== currentDigestLimit()) {
+          loadDigest({ silent: true, reason: 'profile-limit' });
+        }
       });
   }
 
@@ -1083,7 +2164,8 @@
     }
 
     state.data = data;
-    state.events = Array.isArray(data.passed) ? data.passed.filter((event) => event && typeof event === 'object') : [];
+    state.passedEvents = Array.isArray(data.passed) ? data.passed.filter((event) => event && typeof event === 'object') : [];
+    state.events = [];
     state.rejected = Array.isArray(data.rejected) ? data.rejected.filter(Boolean) : [];
     state.stats = data.stats && typeof data.stats === 'object' ? data.stats : null;
     state.meta = data.meta && typeof data.meta === 'object' ? data.meta : null;
@@ -1129,10 +2211,7 @@
       state.query = [];
     }
 
-    if (state.selectedIndex >= state.events.length) {
-      state.selectedIndex = Math.max(0, state.events.length - 1);
-    }
-    if (state.selectedIndex < 0) state.selectedIndex = 0;
+    refreshEventsFromProfile();
 
     dom.listSkeleton.hidden = true;
     dom.refreshButton.disabled = false;
@@ -1175,6 +2254,10 @@
     dom.statusLine.classList.toggle('is-error', Boolean(isError));
   }
 
+  function updateStatusLine() {
+    setStatus(`регион ${REGION_LABELS[state.region]} · порог ${state.threshold.toFixed(2)}${activeFilterSuffix()}`);
+  }
+
   function appendStat(container, label, value, extraClass) {
     if (container.childNodes.length) container.append(el('span', 'stat-sep', ' · '));
     const wrap = el('span', null);
@@ -1209,6 +2292,9 @@
     appendStat(dom.digestStats, 'публикаций', pluralizeNumber(stats.articlesUsed));
     appendStat(dom.digestStats, 'событий', eventsValue);
     appendStat(dom.digestStats, 'прошло', pluralizeNumber(stats.passed));
+    if (state.hiddenCount > 0) {
+      appendStat(dom.digestStats, 'скрыто', pluralizeNumber(state.hiddenCount));
+    }
 
     const failed = Number(stats.sourcesFailed);
     if (!demo && Number.isFinite(failed) && failed > 0) {
@@ -1367,8 +2453,13 @@
     main.append(head, title);
     if (event.summary) main.append(summary);
     main.append(meta);
-    card.append(scoreWrap, main, el('span', 'event-arrow', '▸'));
-    li.append(card);
+    card.append(scoreWrap, main);
+
+    const vote = el('div', 'event-vote');
+    vote.append(createVoteButton(event, 'like'), createVoteButton(event, 'dislike'));
+    const row = el('div', 'event-row');
+    row.append(card, vote);
+    li.append(row);
     return li;
   }
 
@@ -1528,6 +2619,9 @@
       dom.emptyDetail.textContent =
         `${checked}Ни одно событие не превысило порог ${state.threshold.toFixed(2)}. ` +
         'Порог можно снизить — но тогда в список попадёт менее подтверждённое.';
+    }
+    if (state.hiddenCount > 0 && state.events.length === 0) {
+      dom.emptyDetail.textContent += ` Скрыто по вашим настройкам: ${state.hiddenCount}.`;
     }
     dom.resetFilters.hidden = !filtersActive;
 
@@ -1822,6 +2916,10 @@
       badges.append(el('span', 'conflict-badge', `осторожные формулировки: ${speculative.slice(0, 4).join(', ')}`));
     }
     if (badges.childNodes.length) head.append(badges);
+
+    const votes = el('div', 'detail-votes');
+    votes.append(createVoteButton(event, 'like'), createVoteButton(event, 'dislike'));
+    head.append(votes);
 
     hero.append(head);
 
@@ -2404,6 +3502,14 @@
   function onKeyDown(event) {
     if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
 
+    if (dom.interestsDialog && dom.interestsDialog.open) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeInterestsDialog();
+      }
+      return;
+    }
+
     if (dom.bookmarksDialog && dom.bookmarksDialog.open) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -2572,6 +3678,62 @@
       dom.saveBookmark.addEventListener('click', () => saveCurrentEventBookmark());
     }
 
+    if (dom.detailContent) {
+      dom.detailContent.addEventListener('click', (event) => {
+        const voteButton = event.target && event.target.closest ? event.target.closest('[data-vote]') : null;
+        if (!voteButton) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (state.detail) handleVote(state.detail, voteButton.dataset.vote);
+      });
+    }
+
+    if (dom.interestsButton) {
+      dom.interestsButton.addEventListener('click', () => openInterestsDialog());
+    }
+    if (dom.interestsClose) {
+      dom.interestsClose.addEventListener('click', () => closeInterestsDialog());
+    }
+    if (dom.interestsDialog) {
+      dom.interestsDialog.addEventListener('click', (event) => {
+        if (event.target === dom.interestsDialog) closeInterestsDialog();
+      });
+      dom.interestsDialog.addEventListener('close', () => {
+        const target = state.interestsReturnFocus;
+        state.interestsReturnFocus = null;
+        if (target && typeof target.focus === 'function') target.focus();
+      });
+      dom.interestsDialog.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!target) return;
+        if (target.dataset && target.dataset.hiddenTopic) {
+          setHiddenTopic(target.dataset.hiddenTopic, target.checked);
+        } else if (target.dataset && target.dataset.hiddenSource) {
+          setHiddenSource(target.dataset.hiddenSource, target.checked);
+        }
+      });
+    }
+    if (dom.hiddenEventsList) {
+      dom.hiddenEventsList.addEventListener('click', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('[data-unhide-event]') : null;
+        if (!button) return;
+        unhideEvent(button.dataset.unhideEvent);
+      });
+    }
+    if (dom.sortPersonal) dom.sortPersonal.addEventListener('click', () => setSortMode('personal'));
+    if (dom.sortScore) dom.sortScore.addEventListener('click', () => setSortMode('score'));
+    if (dom.profileCodeShow) dom.profileCodeShow.addEventListener('click', () => toggleProfileCodeVisibility());
+    if (dom.profileCodeCopy) dom.profileCodeCopy.addEventListener('click', () => copyProfileCode());
+    if (dom.profileConnect) dom.profileConnect.addEventListener('click', () => connectProfileByCode());
+    if (dom.profileReset) dom.profileReset.addEventListener('click', () => resetProfile());
+    if (dom.toastUndo) {
+      dom.toastUndo.addEventListener('click', () => {
+        const undo = state.toastUndo;
+        hideToast();
+        if (typeof undo === 'function') undo();
+      });
+    }
+
     dom.errorRetry.addEventListener('click', () => {
       hideListError();
       loadDigest(Object.assign({}, state.lastDigestOpts, { silent: false }));
@@ -2600,6 +3762,14 @@
     });
 
     dom.eventList.addEventListener('click', (event) => {
+      const voteButton = event.target && event.target.closest ? event.target.closest('[data-vote]') : null;
+      if (voteButton && dom.eventList.contains(voteButton)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const targetEvent = findEventById(voteButton.dataset.eventId);
+        if (targetEvent) handleVote(targetEvent, voteButton.dataset.vote);
+        return;
+      }
       const card = event.target && event.target.closest ? event.target.closest('.event-card') : null;
       if (!card || !dom.eventList.contains(card)) return;
       const index = Number(card.dataset.index);
@@ -2614,8 +3784,11 @@
     window.addEventListener('popstate', () => applyRoute());
     window.addEventListener('hashchange', () => applyRoute());
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) maybeRefreshStale();
+      if (document.hidden) flushProfileSave();
+      else maybeRefreshStale();
     });
+    window.addEventListener('pagehide', () => flushProfileSave());
+    window.addEventListener('beforeunload', () => flushProfileSave());
   }
 
   // ---------------------------------------------------------------------------
@@ -2648,6 +3821,27 @@
     dom.bookmarkError = document.getElementById('bookmark-error');
     dom.bookmarkSubmit = document.getElementById('bookmark-submit');
     dom.bookmarkCancel = document.getElementById('bookmark-cancel');
+    dom.interestsButton = document.getElementById('interests-button');
+    dom.interestsDialog = document.getElementById('interests-dialog');
+    dom.interestsClose = document.getElementById('interests-close');
+    dom.syncStatus = document.getElementById('sync-status');
+    dom.profileCode = document.getElementById('profile-code');
+    dom.profileCodeShow = document.getElementById('profile-code-show');
+    dom.profileCodeCopy = document.getElementById('profile-code-copy');
+    dom.profileConnectInput = document.getElementById('profile-connect-input');
+    dom.profileConnect = document.getElementById('profile-connect');
+    dom.sortPersonal = document.getElementById('sort-personal');
+    dom.sortScore = document.getElementById('sort-score');
+    dom.hiddenEventsList = document.getElementById('hidden-events-list');
+    dom.hiddenEventsEmpty = document.getElementById('hidden-events-empty');
+    dom.hiddenTopicsList = document.getElementById('hidden-topics-list');
+    dom.hiddenSourcesList = document.getElementById('hidden-sources-list');
+    dom.learnedList = document.getElementById('learned-list');
+    dom.learnedEmpty = document.getElementById('learned-empty');
+    dom.profileReset = document.getElementById('profile-reset');
+    dom.toast = document.getElementById('toast');
+    dom.toastText = document.getElementById('toast-text');
+    dom.toastUndo = document.getElementById('toast-undo');
     dom.thresholdRange = document.getElementById('threshold-range');
     dom.thresholdValue = document.getElementById('threshold-value');
     dom.refreshButton = document.getElementById('refresh-button');
@@ -2711,6 +3905,11 @@
     state.query = initial.query;
     if (state.city !== ALL_FILTER) state.region = 'ru';
 
+    state.profile = readStoredProfile();
+    state.profileToken = readStoredProfileToken();
+    state.profileServerState = readProfileSyncedFlag()
+      ? 'synced'
+      : (readProfilePendingFlag() ? 'pending' : 'local');
     state.bookmarks = readBookmarks();
     state.activeBookmarkId = null;
     if (state.query.length) {
@@ -2754,6 +3953,13 @@
     }
 
     startAutoRefresh();
+    if (state.profileToken && (readProfileSyncedFlag() || readProfilePendingFlag())) {
+      if (readProfilePendingFlag() && !readProfileSyncedFlag()) {
+        window.setTimeout(loadServerProfile, 250);
+      } else {
+        loadServerProfile();
+      }
+    }
   }
 
   if (document.readyState === 'loading') {

@@ -36,6 +36,12 @@ const FEEDBACK_MIN_ELAPSED_MS = 2500;
 const FEEDBACK_PER_IP_PER_HOUR = 3;
 const FEEDBACK_PER_IP_PER_DAY = 10;
 const FEEDBACK_GLOBAL_PER_DAY = 200;
+const PROFILE_DIR = path.join(STATE_DIR, 'profiles');
+const PROFILE_MAX_BYTES = 64 * 1024;
+const PROFILE_TOKEN_RE = /^[a-f0-9]{32,128}$/;
+const PROFILE_RATE_LIMIT = 60; // запросов в минуту на IP
+const profileRate = new Map(); // ipHash -> [ts]
+
 const feedbackSalt = crypto.randomBytes(16).toString('hex');
 const feedbackAttempts = new Map(); // ipHash -> [timestamps]
 let feedbackGlobalDay = []; // timestamps успешных отправок за сутки
@@ -325,6 +331,176 @@ function readBody(req, limitBytes) {
   });
 }
 
+function profileFilePath(token) {
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  return path.join(PROFILE_DIR, `${hash}.json`);
+}
+
+function profileRateOk(ip) {
+  const now = Date.now();
+  const key = hashIp(ip);
+  const attempts = (profileRate.get(key) || []).filter((ts) => ts > now - 60_000);
+  if (attempts.length >= PROFILE_RATE_LIMIT) return false;
+  attempts.push(now);
+  profileRate.set(key, attempts);
+  return true;
+}
+
+const PROFILE_ARRAY_LIMITS = {
+  likes: 500,
+  dislikes: 500,
+  hiddenTopics: 100,
+  hiddenSources: 200,
+};
+
+function sanitizeIdList(value, limit) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim().slice(0, 64);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function sanitizeCounts(value, limitKeys, keyLength = 64) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(out).length >= limitKeys) break;
+    const key = String(rawKey).trim().slice(0, keyLength);
+    const count = Math.max(0, Math.min(999, Math.round(Number(rawValue) || 0)));
+    if (!key || !count) continue;
+    out[key] = count;
+  }
+  return out;
+}
+
+function sanitizeHiddenEvents(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const id = typeof item.id === 'string' ? item.id.trim().slice(0, 64) : '';
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      title: typeof item.title === 'string' ? item.title.trim().slice(0, 300) : '',
+      at: Number.isFinite(Number(item.at)) ? new Date(Number(item.at)).toISOString() : new Date().toISOString(),
+    });
+    if (out.length >= 300) break;
+  }
+  return out;
+}
+
+function sanitizeProfile(input) {
+  const profile = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  return {
+    version: 1,
+    likes: sanitizeIdList(profile.likes, PROFILE_ARRAY_LIMITS.likes),
+    dislikes: sanitizeIdList(profile.dislikes, PROFILE_ARRAY_LIMITS.dislikes),
+    hiddenEvents: sanitizeHiddenEvents(profile.hiddenEvents),
+    hiddenTopics: sanitizeIdList(profile.hiddenTopics, PROFILE_ARRAY_LIMITS.hiddenTopics),
+    hiddenSources: sanitizeIdList(profile.hiddenSources, PROFILE_ARRAY_LIMITS.hiddenSources),
+    likedTopics: sanitizeCounts(profile.likedTopics, 60),
+    likedSources: sanitizeCounts(profile.likedSources, 100),
+    likedKeywords: sanitizeCounts(profile.likedKeywords, 100, 40),
+    sortMode: profile.sortMode === 'score' ? 'score' : 'personal',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function handleProfile(req, res, url) {
+  if (!profileRateOk(clientIp(req))) {
+    sendError(req, res, 429, 'слишком много запросов профиля');
+    return;
+  }
+
+  let token = '';
+  let payload = null;
+
+  if (req.method === 'PUT') {
+    try {
+      const body = await readBody(req, PROFILE_MAX_BYTES);
+      payload = JSON.parse(body.toString('utf8') || '{}');
+    } catch (error) {
+      sendError(req, res, error.status || 400, 'не удалось прочитать профиль');
+      return;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      sendError(req, res, 400, 'неверный формат профиля');
+      return;
+    }
+    token = String(payload.token || '');
+  } else {
+    token = String(req.headers['x-oboz-profile'] || '');
+  }
+
+  if (!token) {
+    sendError(req, res, 400, 'не указан токен профиля');
+    return;
+  }
+  if (!PROFILE_TOKEN_RE.test(token)) {
+    sendError(req, res, 400, 'некорректный токен профиля');
+    return;
+  }
+
+  const file = profileFilePath(token);
+
+  if (req.method === 'GET') {
+    try {
+      const raw = await fs.readFile(file, 'utf8');
+      sendJson(req, res, 200, { profile: JSON.parse(raw) });
+    } catch {
+      sendError(req, res, 404, 'профиль не найден');
+    }
+    return;
+  }
+
+  if (req.method === 'DELETE') {
+    try {
+      await fs.unlink(file);
+    } catch {
+      /* уже нет */
+    }
+    sendJson(req, res, 200, { ok: true });
+    return;
+  }
+
+  // PUT
+  let profile;
+  try {
+    profile = sanitizeProfile(payload.profile ?? payload);
+  } catch {
+    sendError(req, res, 400, 'неверный формат профиля');
+    return;
+  }
+  const serialized = JSON.stringify(profile);
+  if (Buffer.byteLength(serialized) > PROFILE_MAX_BYTES) {
+    sendError(req, res, 413, 'профиль слишком большой');
+    return;
+  }
+  try {
+    await fs.mkdir(PROFILE_DIR, { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fs.writeFile(tmp, serialized, { mode: 0o600 });
+    await fs.rename(tmp, file);
+  } catch (error) {
+    log('profile: save failed:', error.message);
+    sendError(req, res, 500, 'не удалось сохранить профиль');
+    return;
+  }
+  log(`profile saved: hash=${path.basename(file).slice(0, 12)}… bytes=${Buffer.byteLength(serialized)}`);
+  sendJson(req, res, 200, { ok: true, updatedAt: profile.updatedAt });
+}
+
 async function handleFeedback(req, res) {
   const origin = req.headers.origin;
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
@@ -546,6 +722,14 @@ const server = http.createServer(async (req, res) => {
 
   const { pathname } = url;
   try {
+    if (pathname === '/api/profile') {
+      if (req.method === 'GET' || req.method === 'PUT' || req.method === 'DELETE') {
+        await handleProfile(req, res, url);
+        return;
+      }
+      sendError(req, res, 405, 'method not allowed');
+      return;
+    }
     if (req.method === 'POST') {
       if (pathname === '/api/feedback') {
         await handleFeedback(req, res);

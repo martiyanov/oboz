@@ -3,6 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -264,4 +265,47 @@ test('web: обратная связь сохраняется, honeypot и ли�
     }),
   });
   assert.equal(badOrigin.status, 403);
+});
+
+
+test('web: анонимный профиль — сохранение, чтение, удаление', async () => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const headers = { 'Content-Type': 'application/json', 'X-Oboz-Profile': token };
+  const profile = {
+    likes: ['event-1'],
+    dislikes: ['event-2'],
+    hiddenEvents: [{ id: 'event-2', title: 'Скрытая новость', at: Date.now() }],
+    hiddenTopics: ['sport'],
+    hiddenSources: ['rt-ru'],
+    likedTopics: { tech: 3, music: 1 },
+    likedSources: { tass: 2 },
+    likedKeywords: { курск: 2 },
+    sortMode: 'personal',
+  };
+
+  const missing = await fetch(`${BASE}/api/profile`, { headers: { 'X-Oboz-Profile': token } });
+  assert.equal(missing.status, 404);
+
+  const saved = await fetch(`${BASE}/api/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, profile }),
+  });
+  assert.equal(saved.status, 200);
+
+  const loaded = await fetch(`${BASE}/api/profile`, { headers: { 'X-Oboz-Profile': token } });
+  assert.equal(loaded.status, 200);
+  const data = await loaded.json();
+  assert.deepEqual(data.profile.likes, ['event-1']);
+  assert.deepEqual(data.profile.hiddenTopics, ['sport']);
+  assert.deepEqual(data.profile.likedTopics, { tech: 3, music: 1 });
+  assert.equal(data.profile.sortMode, 'personal');
+
+  const invalid = await fetch(`${BASE}/api/profile`, { headers: { 'X-Oboz-Profile': 'not-a-token' } });
+  assert.equal(invalid.status, 400);
+
+  const removed = await fetch(`${BASE}/api/profile`, { method: 'DELETE', headers: { 'X-Oboz-Profile': token } });
+  assert.equal(removed.status, 200);
+  const afterDelete = await fetch(`${BASE}/api/profile`, { headers: { 'X-Oboz-Profile': token } });
+  assert.equal(afterDelete.status, 404);
 });
