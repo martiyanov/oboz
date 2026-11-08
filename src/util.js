@@ -23,7 +23,8 @@ export function htmlToText(input) {
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<\/p>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+    // Снимаем только стандартные HTML-теги: литеральные «a < b» и «<c>» остаются текстом.
+    .replace(/<\/?(?:a|b|i|em|strong|span|div|p|br|img|ul|ol|li|h[1-6]|blockquote|table|tbody|thead|tr|td|th|figure|figcaption|iframe|video|audio|source|sup|sub|code|pre|hr|del|ins|u|small|big|font|center)\b[^>]*>/gi, ' ')
     .replace(/&laquo;|&raquo;/gi, '"')
     .replace(/&mdash;/gi, '—')
     .replace(/&ndash;/gi, '–')
@@ -231,6 +232,26 @@ const WORLD_HINTS = [
   'узбекистан', 'таджикистан', 'киргиз', 'туркмен', 'беларус', 'белорус', 'литв', 'латви',
   'эстони', 'молдов', 'аргентин', 'чили', 'колумб', 'перу', 'венесуэл', 'куба', 'гаити',
 ];
+
+// Служебные/географические/«новостные» токены, которые сами по себе не делают
+// две публикации одним событием (нужны ещё отличительные слова).
+const GENERIC_STEMS = new Set([
+  'облас', 'район', 'город', 'регио', 'край', 'респу', 'село', 'дерев', 'посел', 'окру',
+  'росси', 'украи', 'сша', 'москв', 'петер',
+  'мужчи', 'женщи', 'челов', 'люди', 'ребе', 'дети', 'погиб', 'умерш', 'ранен', 'постра',
+  'сообщ', 'заявл', 'власт', 'полиц', 'суд', 'год', 'день', 'ноч', 'мест', 'случа', 'итог',
+  'резул', 'число', 'колич', 'новый', 'первы', 'вторы', 'может', 'стало', 'извест', 'неизв',
+  'объек', 'инфор', 'данны', 'причи', 'следс', 'время', 'утро', 'вечер', 'сутки', 'уже',
+]);
+
+export function isGenericToken(token) {
+  if (!token) return true;
+  if (GENERIC_STEMS.has(token)) return true;
+  for (const hint of [...RU_HINTS, ...WORLD_HINTS]) {
+    if (hint.length >= 4 && (hint.startsWith(token) || token.startsWith(hint))) return true;
+  }
+  return false;
+}
 
 export function countGeoHints(text) {
   const hay = String(text || '').toLowerCase().replace(/ё/g, 'е');

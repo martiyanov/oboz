@@ -38,6 +38,7 @@ function notifyMac(title, body) {
   try {
     const script = `display notification ${JSON.stringify(body)} with title "Обозреватель" subtitle ${JSON.stringify(title)}`;
     const child = spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' });
+    child.on('error', () => { /* уведомления не критичны */ });
     child.unref();
   } catch {
     /* уведомление не критично */

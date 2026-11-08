@@ -52,7 +52,8 @@ function parseArgs(argv) {
 }
 
 function parseThreshold(value) {
-  if (value === undefined || value === true) return undefined;
+  if (value === undefined) return undefined;
+  if (value === true || value === '') throw new UserError('--threshold требует числовое значение, например --threshold 0.55');
   const num = Number(String(value).replace(',', '.'));
   if (!Number.isFinite(num) || num < 0 || num > 1) {
     throw new UserError('Порог должен быть числом от 0 до 1, например --threshold 0.55');
@@ -61,13 +62,15 @@ function parseThreshold(value) {
 }
 
 function parseRegion(value, fallback) {
-  if (value === undefined || value === true) return fallback;
+  if (value === undefined) return fallback;
+  if (value === true || value === '') throw new UserError('--region требует значение: ru, world или all');
   if (!REGIONS.includes(value)) throw new UserError(`Регион должен быть одним из: ${REGIONS.join(', ')}`);
   return value;
 }
 
 function parseLimit(value, fallback) {
-  if (value === undefined || value === true) return fallback;
+  if (value === undefined) return fallback;
+  if (value === true || value === '') throw new UserError('--limit требует число, например --limit 12');
   const num = Number(value);
   if (!Number.isFinite(num) || num < 1) throw new UserError('--limit должен быть положительным числом');
   return Math.floor(num);
@@ -153,6 +156,11 @@ async function cmdNews(flags) {
 
   if (!digest.passed.length) {
     if (flags.quiet) return 0; // пустой вывод для скриптов
+    if (flags.explain) {
+      // Показываем, что именно и почему отсеклось, даже если не прошло ничего.
+      process.stdout.write(`${formatDigest(digest, { explain: true, width: parsePositiveInt(flags.width) || 96 })}\n`);
+      return 0;
+    }
     process.stdout.write(`${formatEmpty(digest)}\n`);
     return 0;
   }

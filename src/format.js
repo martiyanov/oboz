@@ -62,6 +62,9 @@ export function formatDigest(digest, options = {}) {
         `    ${names.join(', ')} — ${event.domains.length} ${plural(event.domains.length, 'источник', 'источника', 'источников')}` +
         ` · ${timeAgoRu(event.latestAt)} · ${event.claims.length} ${plural(event.claims.length, 'тезис', 'тезиса', 'тезисов')}`,
       );
+      if (event.wiki?.length) {
+        lines.push(`    Фон: ${event.wiki.slice(0, 2).map((ref) => ref.title).join(', ')}`);
+      }
       lines.push(`    ▸ oboz item ${event.id}`);
       lines.push('');
     });
@@ -86,12 +89,12 @@ export function formatDigest(digest, options = {}) {
 export function formatEmpty(digest) {
   const lines = [];
   lines.push('— Ничего существенного не произошло.');
-  lines.push(
-    `Проверено ${digest.stats.sourcesOk} ${plural(digest.stats.sourcesOk, 'источник', 'источника', 'источников')}, ` +
-    `${digest.stats.articlesUsed} ${plural(digest.stats.articlesUsed, 'публикация', 'публикации', 'публикаций')}, ` +
-    `${digest.stats.events} ${plural(digest.stats.events, 'событие', 'события', 'событий')}. ` +
-    `Ни одно не превысило порог ${digest.threshold.toFixed(2)}.`,
-  );
+  const checked = digest.stats.demo
+    ? `Демо-набор: ${digest.stats.articlesUsed} публикаций, ${digest.stats.events} событий`
+    : `Проверено ${digest.stats.sourcesOk} ${plural(digest.stats.sourcesOk, 'источник', 'источника', 'источников')}, ` +
+      `${digest.stats.articlesUsed} ${plural(digest.stats.articlesUsed, 'публикация', 'публикации', 'публикаций')}, ` +
+      `${digest.stats.events} ${plural(digest.stats.events, 'событие', 'события', 'событий')}`;
+  lines.push(`${checked}. Ни одно не превысило порог ${digest.threshold.toFixed(2)}.`);
   return lines.join('\n');
 }
 

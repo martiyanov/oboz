@@ -77,7 +77,7 @@ export async function buildDigest(options = {}) {
     event.notes = notesFor(event);
     event.wiki = [];
     event.wikiLoaded = false;
-    event.reasons = gateReasons({ ...event, score: event.score }, config);
+    event.reasons = gateReasons(event, { ...config, threshold });
     event.region = cluster.scope;
     event.passed = isPassing(event, threshold);
     evaluated.push(event);

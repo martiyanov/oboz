@@ -132,7 +132,7 @@ export async function buildEvidence(event, opts) -> {
 
 ```js
 {
-  id, title, summary, region: ["ru"] | ["world"],
+  id, title, summary, scope: ["ru"] | ["world"] | ["ru","world"],
   score, severity, corroboration, confidence,       // 0..1
   domains: ["interfax.ru", "tass.ru", ...],
   articles: [...], claims: [...], conflicts: [...],
@@ -141,6 +141,9 @@ export async function buildEvidence(event, opts) -> {
   publishedAt, latestAt
 }
 ```
+
+Поле `region` в ранних набросках заменено на `scope` (массив: событие может относиться и к России,
+и к миру); `--json` отдаёт `scope`, а `region` остаётся только параметром фильтра.
 
 Порог (`config.json` → `threshold`, по умолчанию 0.55) применяется к `score`; при этом событие
 проходит, только если `domains.length >= minDomains` И `confidence >= minConfidence`.

@@ -2,23 +2,16 @@
 // Важно: сравнение идёт с «представителем» кластера, а не с любым его членом —
 // это защищает от цепочки ложных склеек (A~B~C, где A и C — разные события).
 import {
-  dice, intersectionSize, titleTokens, extractEntities, hashId, canonicalDomain, countGeoHints,
+  dice, intersectionSize, titleTokens, extractEntities, hashId, canonicalDomain, countGeoHints, isGenericToken,
 } from './util.js';
 
 const TIER_RANK = { A: 0, B: 1, C: 2 };
-
-function bigrams(tokens) {
-  const out = new Set();
-  for (let i = 0; i < tokens.length - 1; i += 1) out.add(`${tokens[i]} ${tokens[i + 1]}`);
-  return out;
-}
 
 function prepare(article, now) {
   const tokens = titleTokens(article.title);
   return {
     article,
     tokens: new Set(tokens),
-    bigrams: bigrams(tokens),
     domain: canonicalDomain(article.domain || article.link),
     publishedAt: article.publishedAt || now,
   };
@@ -37,16 +30,17 @@ function compare(a, b, df) {
   if (shared === 0) return { match: false, similarity: 0 };
   const similarity = dice(a.tokens, b.tokens);
   if (similarity >= 0.66) return { match: true, similarity };
-  const rareShared = [...a.tokens].filter((t) => b.tokens.has(t) && (df.get(t) || 1) <= 2);
-  if (shared >= 2 && similarity >= 0.44 && rareShared.length >= 1) {
+  // Общие редкие ОТЛИЧИТЕЛЬНЫЕ слова: география/«погиб»/«область» сами по себе
+  // не делают события одним и тем же.
+  const distinctiveRare = [...a.tokens].filter(
+    (t) => b.tokens.has(t) && (df.get(t) || 1) <= 2 && !isGenericToken(t),
+  );
+  if (shared >= 2 && similarity >= 0.44 && distinctiveRare.length >= 1) {
     return { match: true, similarity };
   }
-  // Общая редкая биграмма — сильный сигнал одного и того же события.
-  for (const bg of a.bigrams) {
-    if (!b.bigrams.has(bg)) continue;
-    const [x, y] = bg.split(' ');
-    if ((df.get(x) || 1) <= 5 && (df.get(y) || 1) <= 5) return { match: true, similarity: Math.max(similarity, 0.5) };
-  }
+  // Никаких послаблений по одной общей фразе: «Роскомнадзор потребовал…» и
+  // «Роскомнадзор взыскал…» — разные события. Срабатывает только сходство
+  // заголовков + редкие отличительные слова.
   return { match: false, similarity };
 }
 
