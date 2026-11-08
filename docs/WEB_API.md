@@ -98,6 +98,19 @@
   "sources": [{ "id": "tass", "name": "ТАСС", "region": "ru", "tier": "A", "type": "state-agency", "enabled": true, "site": "https://tass.ru" }] }
 ```
 
+### `POST /api/feedback`
+
+Форма обратной связи со страницы `/rating`. Тело — JSON:
+
+```json
+{ "message": "текст 10–2000 символов", "contact": "email/телеграм (необязательно)", "website": "", "startedAt": 1794136000000 }
+```
+
+`website` — honeypot (должно быть пусто), `startedAt` — время открытия формы (UTC ms).
+Ответы: `200 {ok:true}`, `400` (валидация), `403` (чужой Origin), `415` (не JSON),
+`429` (лимит/слишком быстро), `413` (тело > 8 КБ). Сообщения сохраняются в
+`.state/feedback.jsonl`; публичного чтения нет, только `./oboz feedback` на сервере.
+
 ### `GET /healthz`
 
 `{ "ok": true, "uptimeSec": 123, "version": "0.2.0", "cache": { "entries": 3 } }`

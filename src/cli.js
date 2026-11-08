@@ -6,9 +6,9 @@ import { fetchAllSources } from './rss.js';
 import { formatDigest, formatEmpty, formatDossier, formatSourcesTable, publicEvent, REGION_NAMES } from './format.js';
 import { runWatch } from './watch.js';
 import { runTui } from './tui.js';
-import { parseDuration, formatDateTimeRu } from './util.js';
+import { parseDuration, formatDateTimeRu, wrapText } from './util.js';
 import { loadTopics, categoryList, cityList } from './topics.js';
-import { ROOT } from './paths.js';
+import { ROOT, STATE_DIR } from './paths.js';
 
 class UserError extends Error {
   constructor(message) {
@@ -111,6 +111,7 @@ const HELP = `ОБОЗРЕВАТЕЛЬ — терминальный сторож
   oboz item <id>              полное досье события по id
   oboz watch [--every 60m]    периодический обзор (по умолчанию раз в час)
   oboz sources [--check]      список источников / проверка доступности
+  oboz feedback [--limit 20]  прочитать обратную связь с веб-страницы рейтинга
   oboz help                   эта справка
 
 ФЛАГИ
@@ -273,6 +274,37 @@ async function cmdSources(flags) {
   return 0;
 }
 
+async function cmdFeedback(flags) {
+  const limit = Math.max(1, Math.min(200, Number(flags.limit) || 20));
+  const file = `${STATE_DIR}/feedback.jsonl`;
+  let raw = '';
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch {
+    process.stdout.write('Обратной связи пока нет.\n');
+    return 0;
+  }
+  const lines = raw.split('\n').filter(Boolean);
+  const items = [];
+  for (const line of lines) {
+    try { items.push(JSON.parse(line)); } catch { /* пропускаем битые строки */ }
+  }
+  if (!items.length) {
+    process.stdout.write('Обратной связи пока нет.\n');
+    return 0;
+  }
+  const shown = items.slice(-limit).reverse();
+  process.stdout.write(`ОБРАТНАЯ СВЯЗЬ · всего ${items.length}, показаны последние ${shown.length}\n\n`);
+  for (const item of shown) {
+    const when = item.ts ? formatDateTimeRu(Date.parse(item.ts)) : '—';
+    const contact = item.contact ? ` · контакт: ${item.contact}` : '';
+    process.stdout.write(`[${when}]${contact} · ipHash ${item.ipHash || '—'}\n`);
+    for (const line of wrapText(item.message || '', 92)) process.stdout.write(`  ${line}\n`);
+    process.stdout.write('\n');
+  }
+  return 0;
+}
+
 async function cmdTui(flags) {
   const config = await loadConfig();
   const region = parseRegion(flags.region, config.region);
@@ -334,6 +366,8 @@ async function dispatch(argv) {
     case 'sources':
     case 'source':
       return cmdSources(flags);
+    case 'feedback':
+      return cmdFeedback(flags);
     case 'config':
       process.stdout.write(`${JSON.stringify(await loadConfig(), null, 2)}\n`);
       return 0;

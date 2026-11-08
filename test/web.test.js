@@ -3,6 +3,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +13,7 @@ const PORT = 18_000 + Math.floor(Math.random() * 2000);
 const BASE = `http://127.0.0.1:${PORT}`;
 let child = null;
 let output = '';
+let stateDir = '';
 
 function waitHealth(timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
@@ -40,6 +43,7 @@ function waitHealth(timeoutMs = 15_000) {
 }
 
 before(async () => {
+  stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oboz-web-state-'));
   child = spawn(process.execPath, ['web/server.mjs'], {
     cwd: ROOT,
     env: {
@@ -48,6 +52,7 @@ before(async () => {
       OBOZ_WEB_NO_WARM: '1',
       OBOZ_WEB_DEMO: '1',
       OBOZ_WEB_WIKI: '0',
+      OBOZ_STATE_DIR: stateDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -56,9 +61,19 @@ before(async () => {
   await waitHealth();
 });
 
-after(() => {
+after(async () => {
   if (child && child.exitCode === null) child.kill('SIGTERM');
+  if (stateDir) await fs.rm(stateDir, { recursive: true, force: true });
 });
+
+async function feedbackLines() {
+  try {
+    const raw = await fs.readFile(path.join(stateDir, 'feedback.jsonl'), 'utf8');
+    return raw.split('\n').filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+}
 
 test('web: healthz отвечает и отдаёт версию/кэш', async () => {
   const res = await fetch(`${BASE}/healthz`);
@@ -165,4 +180,73 @@ test('web: неизвестные пути и методы не ломают с�
   assert.equal((await fetch(`${BASE}/api/nope`)).status, 404);
   const post = await fetch(`${BASE}/api/digest`, { method: 'POST' });
   assert.equal(post.status, 405);
+});
+
+
+test('web: страница «Как считается рейтинг» и форма обратной связи', async () => {
+  const res = await fetch(`${BASE}/rating`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Как считается рейтинг новости/);
+  assert.match(html, /score = 0\.40/);
+  assert.match(html, /id="feedback-form"/);
+  assert.match(html, /github\.com\/martiyanov\/oboz/);
+  assert.equal((await fetch(`${BASE}/rating.js`)).status, 200);
+  assert.equal((await fetch(`${BASE}/rating.html`)).status, 200);
+});
+
+test('web: обратная связь сохраняется, honeypot и лимиты работают', async () => {
+  const message = `Тестовое сообщение ${Date.now()} про качество рейтинга.`;
+  const ok = await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      contact: 'tester@example.com',
+      website: '',
+      startedAt: Date.now() - 3000,
+    }),
+  });
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).ok, true);
+  const stored = await fs.readFile(path.join(stateDir, 'feedback.jsonl'), 'utf8');
+  assert.ok(stored.includes(message));
+  assert.ok(!stored.includes('tester@example.com') === false);
+
+  const before = await feedbackLines();
+  const honeypot = await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: 'Спам-сообщение от бота, должно быть отброшено.',
+      website: 'https://spam.example',
+      startedAt: Date.now() - 3000,
+    }),
+  });
+  assert.equal(honeypot.status, 200);
+  assert.equal(await feedbackLines(), before, 'honeypot не сохраняется');
+
+  const short = await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'коротко', startedAt: Date.now() - 3000 }),
+  });
+  assert.equal(short.status, 400);
+
+  const tooFast = await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'Слишком быстрая отправка формы ботом.', startedAt: Date.now() }),
+  });
+  assert.equal(tooFast.status, 429);
+
+  const badOrigin = await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
+    body: JSON.stringify({
+      message: 'Сообщение с чужого origin не должно сохраняться.',
+      startedAt: Date.now() - 3000,
+    }),
+  });
+  assert.equal(badOrigin.status, 403);
 });

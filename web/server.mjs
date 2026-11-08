@@ -1,6 +1,7 @@
 // Веб-версия «Обозревателя»: JSON API + статика поверх того же ядра, что и CLI/TUI.
 // Без зависимостей: node:http, node:fs, node:zlib.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { buildDigest, enrichEvent } from '../src/digest.js';
 import { loadConfig, loadSources } from '../src/config.js';
 import { publicEvent } from '../src/format.js';
-import { ROOT } from '../src/paths.js';
+import { ROOT, STATE_DIR } from '../src/paths.js';
 import { loadTopics, categoryList, cityList } from '../src/topics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +27,16 @@ const MIN_THRESHOLD = 0.3;
 const MAX_THRESHOLD = 0.95;
 const MIN_LIMIT = 6;
 const MAX_LIMIT = 30;
+
+const FEEDBACK_FILE = path.join(STATE_DIR, 'feedback.jsonl');
+const FEEDBACK_MAX_BYTES = 8 * 1024;
+const FEEDBACK_MIN_ELAPSED_MS = 2500;
+const FEEDBACK_PER_IP_PER_HOUR = 3;
+const FEEDBACK_PER_IP_PER_DAY = 10;
+const FEEDBACK_GLOBAL_PER_DAY = 200;
+const feedbackSalt = crypto.randomBytes(16).toString('hex');
+const feedbackAttempts = new Map(); // ipHash -> [timestamps]
+let feedbackGlobalDay = []; // timestamps успешных отправок за сутки
 
 const startedAt = Date.now();
 const digestCache = new Map(); // key -> { at, value }
@@ -183,6 +194,9 @@ const STATIC_FILES = {
   '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8', cache: 'public, max-age=300' },
   '/favicon.svg': { file: 'favicon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+  '/rating': { file: 'rating.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/rating.html': { file: 'rating.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/rating.js': { file: 'rating.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
 };
 
 const staticCache = new Map(); // path -> Buffer
@@ -237,6 +251,174 @@ function sendJson(req, res, status, payload, extraHeaders = {}) {
 
 function sendError(req, res, status, message) {
   sendJson(req, res, status, { error: message });
+}
+
+function clientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return String(forwarded).split(',')[0].trim();
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function hashIp(ip) {
+  return crypto.createHash('sha256').update(`${feedbackSalt}:${ip}`).digest('hex').slice(0, 16);
+}
+
+function feedbackRateOk(ipHash) {
+  const now = Date.now();
+  const hourAgo = now - 60 * 60_000;
+  const dayAgo = now - 24 * 60 * 60_000;
+  const attempts = (feedbackAttempts.get(ipHash) || []).filter((ts) => ts > dayAgo);
+  feedbackAttempts.set(ipHash, attempts);
+  const lastHour = attempts.filter((ts) => ts > hourAgo).length;
+  feedbackGlobalDay = feedbackGlobalDay.filter((ts) => ts > dayAgo);
+  if (lastHour >= FEEDBACK_PER_IP_PER_HOUR) return { ok: false, reason: 'слишком много сообщений за час' };
+  if (attempts.length >= FEEDBACK_PER_IP_PER_DAY) return { ok: false, reason: 'слишком много сообщений за сутки' };
+  if (feedbackGlobalDay.length >= FEEDBACK_GLOBAL_PER_DAY) return { ok: false, reason: 'дневной лимит обратной связи исчерпан' };
+  return { ok: true };
+}
+
+function feedbackRateNote(ipHash) {
+  const now = Date.now();
+  const attempts = (feedbackAttempts.get(ipHash) || []).filter((ts) => ts > now - 24 * 60 * 60_000);
+  attempts.push(now);
+  feedbackAttempts.set(ipHash, attempts.slice(-50));
+  feedbackGlobalDay.push(now);
+  feedbackGlobalDay = feedbackGlobalDay.slice(-500);
+}
+
+function readBody(req, limitBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let done = false;
+    const fail = (status, message) => {
+      if (done) return;
+      done = true;
+      reject(Object.assign(new Error(message), { status }));
+    };
+    const timer = setTimeout(() => fail(408, 'timeout'), 8000);
+    timer.unref();
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limitBytes) {
+        fail(413, 'payload too large');
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks));
+    });
+    req.on('error', (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+async function handleFeedback(req, res) {
+  const origin = req.headers.origin;
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  if (origin) {
+    try {
+      const parsed = new URL(origin);
+      const allowedHosts = new Set([host, `www.${host}`]);
+      if (!allowedHosts.has(parsed.host) || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
+        sendError(req, res, 403, 'origin not allowed');
+        return;
+      }
+    } catch {
+      sendError(req, res, 403, 'origin not allowed');
+      return;
+    }
+  }
+
+  if (!String(req.headers['content-type'] || '').includes('application/json')) {
+    sendError(req, res, 415, 'expected application/json');
+    return;
+  }
+
+  const ipHash = hashIp(clientIp(req));
+  const rate = feedbackRateOk(ipHash);
+  if (!rate.ok) {
+    sendError(req, res, 429, rate.reason);
+    return;
+  }
+  // Любая попытка отправки считается в лимит, даже если потом не пройдёт валидацию.
+  feedbackRateNote(ipHash);
+
+  let payload;
+  try {
+    const body = await readBody(req, FEEDBACK_MAX_BYTES);
+    payload = JSON.parse(body.toString('utf8') || '{}');
+  } catch (error) {
+    sendError(req, res, error.status || 400, 'не удалось прочитать сообщение');
+    return;
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    sendError(req, res, 400, 'неверный формат сообщения');
+    return;
+  }
+
+  // Honeypot: скрытое поле должно остаться пустым. Ботам отвечаем как обычно,
+  // но ничего не сохраняем.
+  if (typeof payload.website === 'string' && payload.website.trim() !== '') {
+    log('feedback: honeypot triggered, dropped');
+    sendJson(req, res, 200, { ok: true });
+    return;
+  }
+
+  const started = Number(payload.startedAt);
+  if (!Number.isFinite(started)) {
+    sendError(req, res, 400, 'форма отправлена некорректно');
+    return;
+  }
+  const elapsed = Date.now() - started;
+  if (elapsed < FEEDBACK_MIN_ELAPSED_MS) {
+    sendError(req, res, 429, 'слишком быстро — попробуйте ещё раз');
+    return;
+  }
+  if (elapsed > 2 * 60 * 60_000) {
+    sendError(req, res, 400, 'форма устарела — обновите страницу');
+    return;
+  }
+
+  const message = String(payload.message || '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim();
+  const contact = String(payload.contact || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 200);
+  if (message.length < 10) {
+    sendError(req, res, 400, 'сообщение слишком короткое (минимум 10 символов)');
+    return;
+  }
+  if (message.length > 2000) {
+    sendError(req, res, 400, 'сообщение слишком длинное (максимум 2000 символов)');
+    return;
+  }
+
+  const record = {
+    ts: new Date().toISOString(),
+    message,
+    contact: contact || null,
+    ipHash,
+    ua: String(req.headers['user-agent'] || '').slice(0, 160),
+  };
+  try {
+    await fs.mkdir(STATE_DIR, { recursive: true });
+    await fs.appendFile(FEEDBACK_FILE, `${JSON.stringify(record)}\n`);
+  } catch (error) {
+    log('feedback: save failed:', error.message);
+    sendError(req, res, 500, 'не удалось сохранить сообщение');
+    return;
+  }
+  stats.feedback = (stats.feedback || 0) + 1;
+  log(`feedback saved: len=${message.length} ipHash=${ipHash}`);
+  sendJson(req, res, 200, { ok: true });
 }
 
 async function handleApi(req, res, url) {
@@ -353,6 +535,14 @@ const server = http.createServer(async (req, res) => {
 
   const { pathname } = url;
   try {
+    if (req.method === 'POST') {
+      if (pathname === '/api/feedback') {
+        await handleFeedback(req, res);
+        return;
+      }
+      sendError(req, res, 405, 'method not allowed');
+      return;
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendError(req, res, 405, 'method not allowed');
       return;

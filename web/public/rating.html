@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0b0d0c">
+  <meta name="description" content="Как «Обозреватель» считает рейтинг новости: значимость, подтверждения, свежесть, достоверность, порог и правило двух источников. Обратная связь по качеству рейтинга.">
+  <title>Как считается рейтинг — ОБОЗРЕВАТЕЛЬ</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="rating-page">
+  <a class="skip-link" href="#main">к содержимому</a>
+
+  <header class="app-header rating-header">
+    <div class="header-top">
+      <a class="brand brand-link" href="./" aria-label="Обозреватель — к сводке">
+        <svg class="brand-eye" viewBox="0 0 32 32" width="22" height="22" aria-hidden="true" focusable="false">
+          <path d="M3.5 16C6.7 10.8 11.2 8 16 8s9.3 2.8 12.5 8C25.3 21.2 20.8 24 16 24S6.7 21.2 3.5 16Z" fill="none" stroke="currentColor" stroke-width="1.8"></path>
+          <circle cx="16" cy="16" r="3.2" fill="currentColor"></circle>
+        </svg>
+        <span class="brand-text">
+          <span class="brand-title">ОБОЗРЕВАТЕЛЬ</span>
+          <span class="brand-sub">как считается рейтинг</span>
+        </span>
+      </a>
+
+      <div class="header-actions">
+        <a class="icon-button" href="./" title="К сводке">← к сводке</a>
+        <button type="button" class="icon-button theme-toggle" id="theme-toggle" aria-label="Включить светлую тему" title="Включить светлую тему">
+          <span class="theme-icon icon-sun" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <circle cx="12" cy="12" r="4.1"></circle>
+              <path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"></path>
+            </svg>
+          </span>
+          <span class="theme-icon icon-moon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20.2 14.4A8.4 8.4 0 1 1 9.6 3.8a6.9 6.9 0 0 0 10.6 10.6Z"></path>
+            </svg>
+          </span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main rating-main" id="main">
+    <article class="rating-article">
+      <header class="rating-hero">
+        <p class="rating-eyebrow">прозрачность оценки</p>
+        <h2 class="rating-title">Как считается рейтинг новости</h2>
+        <p class="rating-lead">
+          «Обозреватель» — не лента. Он собирает публикации из 32 источников, склеивает их в события
+          и показывает только те, что прошли ваш порог значимости и подтверждены независимыми
+          редакциями. Ниже — точная формула и правила, без «магии».
+        </p>
+      </header>
+
+      <section class="rating-section" aria-labelledby="formula-title">
+        <h3 id="formula-title" class="rating-section-title">Формула</h3>
+        <pre class="formula" aria-label="Формула рейтинга">score = 0.40 × S + 0.25 × C + 0.15 × R + 0.20 × D</pre>
+        <p>
+          Каждое слагаемое — от 0 до 1. Итоговый <code>score</code> — тоже 0…1; на экране он
+          показывается целым числом 0–100 (например, <span class="rating-score">84</span>).
+          Веса заданы в <code>config.json</code> → <code>weights</code> и могут быть изменены.
+        </p>
+      </section>
+
+      <section class="rating-section" aria-labelledby="parts-title">
+        <h3 id="parts-title" class="rating-section-title">Слагаемые</h3>
+        <dl class="rating-grid">
+          <div class="rating-card">
+            <dt><span class="rating-letter">S</span> значимость</dt>
+            <dd>
+              Взвешенные ключевые слова в заголовке и лиде: война, погибшие, санкции, катастрофы,
+              кризис, власть, законы, технологии, музыка… Веса и списки слов — в
+              <code>config.json</code> → <code>severity.groups</code>. Для тематических событий
+              («Технологии», «Музыка», «Культура», «Наука», «Спорт») действует минимальная
+              значимость 0.35, чтобы узкие темы не проваливались только из-за лексики.
+            </dd>
+          </div>
+          <div class="rating-card">
+            <dt><span class="rating-letter">C</span> подтверждения</dt>
+            <dd>
+              Сколько <strong>независимых доменов</strong> написали об одном и том же событии,
+              с учётом доверия источника. 1 домен → 0.05, 2 → ≈0.5, 3 → ≈0.7, 4 → ≈0.85, 5+
+              → 1.0. Зеркала и один холдинг не считаются разными источниками.
+            </dd>
+          </div>
+          <div class="rating-card">
+            <dt><span class="rating-letter">R</span> свежесть</dt>
+            <dd>
+              Плавно убывает от времени последней публикации события (экспонента с периодом 18
+              часов). Важные события вчерашнего вечера ещё видны, недельной давности — нет.
+            </dd>
+          </div>
+          <div class="rating-card">
+            <dt><span class="rating-letter">D</span> достоверность</dt>
+            <dd>
+              Складывается из подтверждений, тира источников и наличия официального первоисточника
+              («сообщил», «пресс-служба», «Минобороны», «губернатор»), минус штрафы за расхождения
+              в цифрах и спекулятивные формулировки («якобы», «по слухам»).
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="rating-section" aria-labelledby="gate-title">
+        <h3 id="gate-title" class="rating-section-title">Когда событие показывается</h3>
+        <p>Одновременно должны выполняться три условия:</p>
+        <ol class="rating-gate">
+          <li><code>score ≥ порога</code> — по умолчанию 0.55, вы задаёте его слайдером или в <code>config.json</code>;</li>
+          <li><code>независимых источников ≥ 2</code> — одиночная публикация не показывается, даже если она «громкая»;</li>
+          <li><code>достоверность ≥ 0.50</code> — не показываются события с расхождениями, спекуляциями и слабыми источниками.</li>
+        </ol>
+        <p class="rating-note">
+          Поэтому в узких темах (например, «Музыка») часто пусто: материалы о концертах и альбомах
+          обычно выходят в одном издании. Это осознанный компромисс: лучше пропустить, чем показать
+          неподтверждённое. В пустом состоянии страница честно перечисляет, что именно не прошло
+          порог или подтверждение.
+        </p>
+      </section>
+
+      <section class="rating-section" aria-labelledby="examples-title">
+        <h3 id="examples-title" class="rating-section-title">Примеры</h3>
+        <div class="rating-examples">
+          <div class="rating-example">
+            <p class="rating-example-head">4 источника, официальный первоисточник</p>
+            <p>S ≈ 1.0, C = 0.81, R = 0.94, D = 0.89 → <strong>score ≈ 0.92</strong>. Показывается.</p>
+          </div>
+          <div class="rating-example">
+            <p class="rating-example-head">2 источника среднего доверия</p>
+            <p>S ≈ 0.95, C = 0.5, R = 0.9, D ≈ 0.72 → <strong>score ≈ 0.78</strong>. Показывается.</p>
+          </div>
+          <div class="rating-example">
+            <p class="rating-example-head">Один источник</p>
+            <p>Даже при S = 1.0 и высоком D событие не проходит условие «≥ 2 источника».</p>
+          </div>
+          <div class="rating-example">
+            <p class="rating-example-head">Источники расходятся в цифрах</p>
+            <p>D снижается на 0.18, событие чаще уходит ниже порога — расхождение видно в досье.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="rating-section" aria-labelledby="limits-title">
+        <h3 id="limits-title" class="rating-section-title">Чего формула не гарантирует</h3>
+        <ul class="rating-list">
+          <li>Это не редакционный фактчекинг: инструмент не звонит в пресс-службы и не проверяет документы.</li>
+          <li>Совпадение нескольких изданий не гарантирует истины — они могут ссылаться на один анонимный источник.</li>
+          <li>Кластеризация эвристическая: событие иногда распадается на два (недосчёт подтверждений — безопасная ошибка) или склеивается лишнее.</li>
+          <li>Википедия — только фон, а не доказательство.</li>
+          <li>Текст не генерируется моделью: все тезисы — фрагменты реальных публикаций со ссылками.</li>
+        </ul>
+      </section>
+
+      <section class="rating-section" aria-labelledby="tune-title">
+        <h3 id="tune-title" class="rating-section-title">Как настроить под себя</h3>
+        <p>Порог меняется на главной странице (слайдер) и клавишами <kbd>t</kbd>/<kbd>T</kbd> в терминале.
+          Веса, ключевые слова, минимальное число источников и порог достоверности — в
+          <code>config.json</code>.</p>
+        <pre class="code-block"><code># терминальная версия
+./oboz news --region ru --threshold 0.7
+./oboz news --category tech
+./oboz news --city moscow</code></pre>
+      </section>
+
+      <section class="rating-section rating-feedback" id="feedback" aria-labelledby="feedback-title">
+        <h3 id="feedback-title" class="rating-section-title">Обратная связь по качеству рейтинга</h3>
+        <p>
+          Что в формуле кажется неверным? Какие события несправедливо скрыты или, наоборот,
+          проходят порог зря? Напишите — сообщение сохраняется на этом сервере и видно только
+          владельцу «Обозревателя».
+        </p>
+        <form class="feedback-form" id="feedback-form" novalidate>
+          <div class="hp" aria-hidden="true">
+            <label for="feedback-website">Website</label>
+            <input id="feedback-website" name="website" type="text" tabindex="-1" autocomplete="off">
+          </div>
+
+          <div class="field">
+            <label for="feedback-message">Сообщение</label>
+            <textarea id="feedback-message" name="message" rows="5" minlength="10" maxlength="2000"
+              required placeholder="Например: событие про X скрыто, хотя подтверждено тремя источниками, потому что…"></textarea>
+            <p class="field-hint">От 10 до 2000 символов</p>
+          </div>
+
+          <div class="field">
+            <label for="feedback-contact">Контакт для ответа <span class="field-optional">(необязательно)</span></label>
+            <input id="feedback-contact" name="contact" type="text" maxlength="200" autocomplete="off"
+              placeholder="email или телеграм">
+          </div>
+
+          <div class="feedback-actions">
+            <button type="submit" class="feedback-submit" id="feedback-submit">Отправить</button>
+            <p class="form-note">
+              Защита от спама: скрытое поле-ловушка, проверка времени заполнения, лимиты на IP,
+              проверка Origin; IP хранится только как необратимый хеш.
+            </p>
+          </div>
+          <p class="form-status" id="feedback-status" role="status" aria-live="polite"></p>
+        </form>
+        <p class="feedback-fallback">
+          Если форма не работает — создайте issue в репозитории:
+          <a href="https://github.com/martiyanov/oboz/issues" target="_blank" rel="noopener noreferrer">github.com/martiyanov/oboz/issues</a>.
+        </p>
+      </section>
+
+      <section class="rating-section rating-repo" aria-labelledby="repo-title">
+        <h3 id="repo-title" class="rating-section-title">Исходники и терминальная утилита</h3>
+        <p>
+          Веб-версия и CLI/TUI используют одно и то же ядро — <code>src/digest.js</code>. Полный
+          исходный код, тесты и терминальная утилита:
+          <a href="https://github.com/martiyanov/oboz" target="_blank" rel="noopener noreferrer">github.com/martiyanov/oboz</a>.
+        </p>
+        <pre class="code-block"><code>git clone git@github.com:martiyanov/oboz.git
+cd oboz
+./oboz news --region ru --threshold 0.7
+./oboz tui</code></pre>
+        <p class="rating-note">Без зависимостей: нужен только Node.js ≥ 20.</p>
+      </section>
+    </article>
+  </main>
+
+  <footer class="app-footer">
+    <p class="ethics-note">
+      <a href="./">← к сводке</a> · Подтверждение — это несколько независимых редакций, а не гарантия
+      истины; Википедия — только фон.
+    </p>
+  </footer>
+
+  <script src="rating.js" defer></script>
+</body>
+</html>
