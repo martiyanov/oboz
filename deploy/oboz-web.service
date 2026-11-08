@@ -1,0 +1,29 @@
+[Unit]
+Description=Obozrevatel web (news watcher with significance threshold)
+Documentation=https://github.com/martiyanov/oboz
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/home/openclaw/oboz
+Environment=NODE_ENV=production
+Environment=OBOZ_WEB_HOST=127.0.0.1
+Environment=OBOZ_WEB_PORT=8788
+Environment=OBOZ_WEB_CACHE_TTL_MS=180000
+ExecStart=/usr/bin/node /home/openclaw/oboz/web/server.mjs
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oboz-web
+
+[Install]
+WantedBy=multi-user.target

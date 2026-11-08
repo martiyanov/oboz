@@ -1,6 +1,6 @@
 {
   "name": "obozrevatel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Обозреватель — терминальный сторож новостей: показывает только значимые и подтверждённые события, с порогом и разбором доказательств",
   "type": "module",
@@ -11,7 +11,8 @@
     "start": "node ./oboz",
     "test": "node --test",
     "sources": "node ./oboz sources",
-    "tui:smoke": "node scripts/tui-headless.mjs"
+    "tui:smoke": "node scripts/tui-headless.mjs",
+    "web": "node web/server.mjs"
   },
   "engines": {
     "node": ">=20"

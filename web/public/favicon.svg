@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-labelledby="favicon-title">
+  <title id="favicon-title">Обозреватель — сторож новостей</title>
+  <rect width="32" height="32" rx="5" fill="#0a0e0c"/>
+  <rect x="1" y="1" width="30" height="30" rx="4.5" fill="none" stroke="#3fb950" stroke-opacity=".45"/>
+  <path d="M4.5 16C7.4 11.2 11.4 8.8 16 8.8s8.6 2.4 11.5 7.2C24.6 20.8 20.6 23.2 16 23.2S7.4 20.8 4.5 16Z" fill="none" stroke="#7ee787" stroke-width="1.6"/>
+  <circle cx="16" cy="16" r="3.2" fill="#7ee787"/>
+  <path d="M8 27h16" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="2 3" opacity=".8"/>
+</svg>
