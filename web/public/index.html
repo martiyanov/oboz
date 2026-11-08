@@ -57,6 +57,36 @@
     </div>
 
     <div class="header-controls">
+      <div class="filters-control" id="filters-control">
+        <div class="filter-control">
+          <label class="filter-label" for="category-select">тема</label>
+          <span class="filter-select-wrap">
+            <select class="filter-select" id="category-select" data-testid="category-select" aria-label="Фильтр по теме">
+              <option value="all">Все темы</option>
+              <option value="politics">Политика</option>
+              <option value="economy">Экономика</option>
+              <option value="society">Общество</option>
+              <option value="tech">Технологии</option>
+              <option value="music">Музыка</option>
+              <option value="culture">Культура</option>
+              <option value="science">Наука</option>
+              <option value="sport">Спорт</option>
+              <option value="incidents">Происшествия</option>
+            </select>
+          </span>
+        </div>
+        <div class="filter-control">
+          <label class="filter-label" for="city-select">город</label>
+          <span class="filter-select-wrap">
+            <select class="filter-select" id="city-select" data-testid="city-select" aria-label="Фильтр по городу">
+              <option value="all">Все города</option>
+              <option value="moscow">Москва</option>
+              <option value="nizhny">Нижний Новгород</option>
+            </select>
+          </span>
+        </div>
+      </div>
+
       <div class="threshold-control">
         <label class="threshold-label" for="threshold-range">порог</label>
         <input
@@ -135,6 +165,7 @@
         <p class="empty-title">Ничего существенного не произошло</p>
         <p class="empty-detail" id="empty-detail"></p>
         <div class="empty-actions">
+          <button type="button" class="lower-button reset-filters-button" id="reset-filters" data-testid="reset-filters" hidden>сбросить фильтры</button>
           <button type="button" class="lower-button" id="lower-threshold">снизить порог</button>
         </div>
         <div class="rejected-block" id="rejected-block" hidden>

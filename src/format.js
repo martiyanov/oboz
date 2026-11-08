@@ -35,8 +35,16 @@ function sourceNames(event) {
 export function formatDigest(digest, options = {}) {
   const width = Math.min(options.width || 96, 110);
   const regionName = REGION_NAMES[digest.region] || digest.region;
+  const filterParts = [];
+  if (digest.category && digest.category !== 'all' && digest.filters?.category?.label) {
+    filterParts.push(`тема: ${digest.filters.category.label}`);
+  }
+  if (digest.city && digest.city !== 'all' && digest.filters?.city?.label) {
+    filterParts.push(`город: ${digest.filters.city.label}`);
+  }
+  const filterSuffix = filterParts.length ? ` · ${filterParts.join(' · ')}` : '';
   const lines = [];
-  lines.push(`ОБОЗРЕВАТЕЛЬ · ${regionName.toUpperCase()} · ${formatDateTimeRu(digest.generatedAt)} · порог ${digest.threshold.toFixed(2)}`);
+  lines.push(`ОБОЗРЕВАТЕЛЬ · ${regionName.toUpperCase()}${filterSuffix} · ${formatDateTimeRu(digest.generatedAt)} · порог ${digest.threshold.toFixed(2)}`);
   const sourceLine = digest.stats.demo
     ? 'Источники: демо-набор (без сети)'
     : `Источники: ${digest.stats.sourcesOk}/${digest.stats.sourcesTotal}`;
@@ -227,6 +235,8 @@ export function publicEvent(event) {
     title: event.title,
     summary: event.summary,
     scope: event.scope,
+    topics: event.topics || [],
+    cities: event.cities || [],
     score: event.score,
     severity: event.severity,
     corroboration: event.corroboration,

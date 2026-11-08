@@ -315,6 +315,188 @@
         "politics"
       ],
       "enabled": true
+    },
+    {
+      "id": "3dnews",
+      "name": "3DNews",
+      "url": "https://3dnews.ru/news/rss/",
+      "site": "https://3dnews.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "tech",
+        "science"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ixbt",
+      "name": "iXBT.com",
+      "url": "https://www.ixbt.com/export/news/rss.xml",
+      "site": "https://www.ixbt.com",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "tech"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "habr",
+      "name": "Хабр. Новости",
+      "url": "https://habr.com/ru/rss/news/?fl=ru",
+      "site": "https://habr.com",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "C",
+      "type": "aggregator",
+      "topics": [
+        "tech"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "techcrunch",
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "site": "https://techcrunch.com",
+      "lang": "en",
+      "region": "world",
+      "tier": "B",
+      "type": "foreign",
+      "topics": [
+        "tech"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "intermedia",
+      "name": "ИнтерМедиа",
+      "url": "https://www.intermedia.ru/rss/news",
+      "site": "https://www.intermedia.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "music",
+        "culture"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "soyuz",
+      "name": "Союз — новости музыки",
+      "url": "https://www.soyuz.ru/rss/news",
+      "site": "https://www.soyuz.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "music",
+        "culture"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "pitchfork",
+      "name": "Pitchfork",
+      "url": "https://pitchfork.com/feed/feed-news/rss",
+      "site": "https://pitchfork.com",
+      "lang": "en",
+      "region": "world",
+      "tier": "A",
+      "type": "foreign",
+      "topics": [
+        "music",
+        "culture"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "nme",
+      "name": "NME",
+      "url": "https://www.nme.com/news/music/feed",
+      "site": "https://www.nme.com",
+      "lang": "en",
+      "region": "world",
+      "tier": "B",
+      "type": "foreign",
+      "topics": [
+        "music",
+        "culture"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "moskvichmag",
+      "name": "Москвич Mag",
+      "url": "https://moskvichmag.ru/feed/",
+      "site": "https://moskvichmag.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "city",
+        "society",
+        "culture"
+      ],
+      "city": "moscow",
+      "enabled": true
+    },
+    {
+      "id": "m24",
+      "name": "Москва 24",
+      "url": "https://www.m24.ru/rss.xml",
+      "site": "https://www.m24.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "C",
+      "type": "state-affiliated",
+      "topics": [
+        "city",
+        "society"
+      ],
+      "city": "moscow",
+      "enabled": true
+    },
+    {
+      "id": "vremyan",
+      "name": "Время Н",
+      "url": "https://www.vremyan.ru/rss/news.rss",
+      "site": "https://www.vremyan.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "city",
+        "society"
+      ],
+      "city": "nizhny",
+      "enabled": true
+    },
+    {
+      "id": "niann",
+      "name": "НИА «Нижний Новгород»",
+      "url": "https://www.niann.ru/rss",
+      "site": "https://www.niann.ru",
+      "lang": "ru",
+      "region": "ru",
+      "tier": "B",
+      "type": "independent",
+      "topics": [
+        "city",
+        "society"
+      ],
+      "city": "nizhny",
+      "enabled": true
     }
   ]
 }

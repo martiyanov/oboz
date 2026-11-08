@@ -8,6 +8,8 @@ export const DEFAULT_CONFIG = {
   minDomains: 2,
   minConfidence: 0.5,
   maxAgeHours: 36,
+  maxArticlesPerSource: 150,
+  specializedSeverityFloor: 0.35,
   limit: 12,
   cacheTtlSec: 300,
   wiki: true,

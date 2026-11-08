@@ -35,6 +35,25 @@
     attribution: 'со ссылкой на источник',
   };
 
+  const ALL_FILTER = 'all';
+  const FALLBACK_CATEGORIES = [
+    { id: 'all', label: 'Все темы' },
+    { id: 'politics', label: 'Политика' },
+    { id: 'economy', label: 'Экономика' },
+    { id: 'society', label: 'Общество' },
+    { id: 'tech', label: 'Технологии' },
+    { id: 'music', label: 'Музыка' },
+    { id: 'culture', label: 'Культура' },
+    { id: 'science', label: 'Наука' },
+    { id: 'sport', label: 'Спорт' },
+    { id: 'incidents', label: 'Происшествия' },
+  ];
+  const FALLBACK_CITIES = [
+    { id: 'all', label: 'Все города' },
+    { id: 'moscow', label: 'Москва' },
+    { id: 'nizhny', label: 'Нижний Новгород' },
+  ];
+
   // ---------------------------------------------------------------------------
   // Состояние
   // ---------------------------------------------------------------------------
@@ -42,6 +61,11 @@
   const state = {
     region: DEFAULT_REGION,
     threshold: DEFAULT_THRESHOLD,
+    category: ALL_FILTER,
+    city: ALL_FILTER,
+    categoryOptions: FALLBACK_CATEGORIES.map((item) => ({ id: item.id, label: item.label })),
+    cityOptions: FALLBACK_CITIES.map((item) => ({ id: item.id, label: item.label })),
+    filterSignature: '',
     view: 'list', // 'list' | 'detail'
     data: null,
     events: [],
@@ -130,6 +154,76 @@
     if (n >= 0.85) return 'score-high';
     if (n >= 0.65) return 'score-mid';
     return 'score-low';
+  }
+
+  /* --- Фильтры по теме и городу --- */
+
+  function hasFilterOption(options, id) {
+    return Array.isArray(options) && options.some((option) => option.id === id);
+  }
+
+  function optionLabel(options, id) {
+    const found = Array.isArray(options) ? options.find((option) => option.id === id) : null;
+    return found ? found.label : id;
+  }
+
+  /* Списки приходят из meta.categories/meta.cities; fallback — дефолты контракта. */
+  function normalizeFilterOptions(rawOptions, fallback) {
+    const options = [];
+    const seen = new Set();
+    if (Array.isArray(rawOptions)) {
+      for (const item of rawOptions) {
+        if (!item || typeof item !== 'object') continue;
+        const id = typeof item.id === 'string' ? item.id.trim() : '';
+        const label = typeof item.label === 'string' ? item.label.trim() : '';
+        if (!/^[a-z0-9-]{1,32}$/.test(id) || !label || seen.has(id)) continue;
+        seen.add(id);
+        options.push({ id, label });
+      }
+    }
+    if (!options.length) {
+      return fallback.map((item) => ({ id: item.id, label: item.label }));
+    }
+    if (!seen.has(ALL_FILTER)) {
+      const all = fallback.find((item) => item.id === ALL_FILTER);
+      options.unshift({ id: ALL_FILTER, label: all ? all.label : 'Все' });
+    }
+    return options;
+  }
+
+  function filterSignature(categories, cities) {
+    const part = (options) => options.map((option) => `${option.id}:${option.label}`).join('|');
+    return `${part(categories)}//${part(cities)}`;
+  }
+
+  function populateFilterSelect(select, options, value) {
+    if (!select) return;
+    clearNode(select);
+    options.forEach((option) => {
+      const node = document.createElement('option');
+      node.value = option.id;
+      node.textContent = option.label;
+      select.append(node);
+    });
+    if (!hasFilterOption(options, value)) {
+      const node = document.createElement('option');
+      node.value = value;
+      node.textContent = value;
+      select.append(node);
+    }
+    select.value = value;
+  }
+
+  function rebuildFilterSelects() {
+    populateFilterSelect(dom.categorySelect, state.categoryOptions, state.category);
+    populateFilterSelect(dom.citySelect, state.cityOptions, state.city);
+  }
+
+  function activeFilterSuffix() {
+    const parts = [];
+    if (state.category !== ALL_FILTER) parts.push(`тема «${optionLabel(state.categoryOptions, state.category)}»`);
+    if (state.city !== ALL_FILTER) parts.push(`город «${optionLabel(state.cityOptions, state.city)}»`);
+    return parts.length ? ` · ${parts.join(' · ')}` : '';
   }
 
   function formatNumberValue(value, unit) {
@@ -275,25 +369,40 @@
   // URL и история
   // ---------------------------------------------------------------------------
 
+  function readFilterId(value, fallback) {
+    if (typeof value !== 'string') return fallback;
+    const id = value.trim();
+    return /^[a-z0-9-]{1,32}$/.test(id) ? id : fallback;
+  }
+
   function readUrlState() {
     let region = DEFAULT_REGION;
     let threshold = DEFAULT_THRESHOLD;
+    let category = ALL_FILTER;
+    let city = ALL_FILTER;
     let eventId = null;
     try {
       const params = new URLSearchParams(window.location.search);
       const regionParam = params.get('region');
       if (REGIONS.includes(regionParam)) region = regionParam;
       if (params.has('threshold')) threshold = normalizeThreshold(params.get('threshold'));
+      category = readFilterId(params.get('category'), ALL_FILTER);
+      city = readFilterId(params.get('city'), ALL_FILTER);
+      if (city !== ALL_FILTER) region = 'ru';
       eventId = readEventIdFromHash(window.location.hash);
     } catch {
       /* некорректный URL — дефолты */
     }
-    return { region, threshold, eventId };
+    return { region, threshold, category, city, eventId };
   }
 
   function buildUrl(hash) {
-    const search = `?region=${encodeURIComponent(state.region)}&threshold=${state.threshold.toFixed(2)}`;
-    return `${window.location.pathname}${search}${hash || ''}`;
+    const params = new URLSearchParams();
+    params.set('region', state.region);
+    params.set('threshold', state.threshold.toFixed(2));
+    params.set('category', state.category);
+    params.set('city', state.city);
+    return `${window.location.pathname}?${params.toString()}${hash || ''}`;
   }
 
   function syncUrl() {
@@ -361,6 +470,8 @@
 
     const requestedRegion = state.region;
     const requestedThreshold = state.threshold;
+    const requestedCategory = state.category;
+    const requestedCity = state.city;
 
     state.loading = true;
     dom.refreshButton.disabled = true;
@@ -381,12 +492,14 @@
     params.set('region', requestedRegion);
     params.set('threshold', requestedThreshold.toFixed(2));
     params.set('limit', String(EVENTS_LIMIT));
+    params.set('category', requestedCategory);
+    params.set('city', requestedCity);
     if (opts.refresh) params.set('refresh', '1');
 
     return fetchJson(`api/digest?${params.toString()}`, controller.signal)
       .then((data) => {
         if (token !== state.digestToken) return;
-        applyDigest(data, { requestedRegion, requestedThreshold });
+        applyDigest(data, { requestedRegion, requestedThreshold, requestedCategory, requestedCity });
         hideListError();
       })
       .catch((error) => {
@@ -423,6 +536,31 @@
       state.threshold = normalizeThreshold(serverThreshold);
     }
 
+    const meta = state.meta && typeof state.meta === 'object' ? state.meta : null;
+    const categories = normalizeFilterOptions(meta && meta.categories, FALLBACK_CATEGORIES);
+    const cities = normalizeFilterOptions(meta && meta.cities, FALLBACK_CITIES);
+    const signature = filterSignature(categories, cities);
+    if (signature !== state.filterSignature) {
+      state.categoryOptions = categories;
+      state.cityOptions = cities;
+      state.filterSignature = signature;
+      rebuildFilterSelects();
+    }
+
+    const serverCategory = typeof data.category === 'string' ? data.category : null;
+    const serverCity = typeof data.city === 'string' ? data.city : null;
+    if (serverCategory && serverCategory === requested.requestedCategory && hasFilterOption(categories, serverCategory)) {
+      state.category = serverCategory;
+    } else if (!hasFilterOption(categories, state.category)) {
+      state.category = ALL_FILTER;
+    }
+    if (serverCity && serverCity === requested.requestedCity && hasFilterOption(cities, serverCity)) {
+      state.city = serverCity;
+    } else if (!hasFilterOption(cities, state.city)) {
+      state.city = ALL_FILTER;
+    }
+    if (state.city !== ALL_FILTER) state.region = 'ru';
+
     if (state.selectedIndex >= state.events.length) {
       state.selectedIndex = Math.max(0, state.events.length - 1);
     }
@@ -437,7 +575,9 @@
 
     if (state.view === 'list') {
       renderList();
-      setStatus(`регион ${REGION_LABELS[state.region]} · порог ${state.threshold.toFixed(2)}`);
+      setStatus(
+        `регион ${REGION_LABELS[state.region]} · порог ${state.threshold.toFixed(2)}${activeFilterSuffix()}`,
+      );
     }
   }
 
@@ -488,8 +628,15 @@
     } else {
       appendStat(dom.digestStats, 'источников', sourcesText);
     }
+    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER;
+    const matchedEvents = Number(stats.events);
+    const allEventsCount = Number(stats.allEvents);
+    const eventsValue = filtersActive && Number.isFinite(matchedEvents) && Number.isFinite(allEventsCount)
+      ? `${pluralizeNumber(matchedEvents)} из ${pluralizeNumber(allEventsCount)}`
+      : pluralizeNumber(stats.events);
+
     appendStat(dom.digestStats, 'публикаций', pluralizeNumber(stats.articlesUsed));
-    appendStat(dom.digestStats, 'событий', pluralizeNumber(stats.events));
+    appendStat(dom.digestStats, 'событий', eventsValue);
     appendStat(dom.digestStats, 'прошло', pluralizeNumber(stats.passed));
 
     const failed = Number(stats.sourcesFailed);
@@ -510,6 +657,8 @@
     dom.thresholdRange.value = state.threshold.toFixed(2);
     dom.thresholdValue.textContent = state.threshold.toFixed(2);
     dom.thresholdRange.setAttribute('aria-valuetext', state.threshold.toFixed(2));
+    if (dom.categorySelect) dom.categorySelect.value = state.category;
+    if (dom.citySelect) dom.citySelect.value = state.city;
     dom.regionButtons.forEach((button) => {
       const active = button.dataset.region === state.region;
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -676,6 +825,7 @@
 
     dom.emptyState.hidden = true;
     dom.eventList.hidden = false;
+    if (dom.resetFilters) dom.resetFilters.hidden = true;
     clearNode(dom.eventList);
 
     state.events.forEach((event, index) => {
@@ -755,6 +905,10 @@
     const articles = Number.isFinite(Number(stats.articlesUsed)) ? Number(stats.articlesUsed) : null;
     const events = Number.isFinite(Number(stats.events)) ? Number(stats.events) : null;
 
+    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER;
+    const allEvents = Number.isFinite(Number(stats.allEvents)) ? Number(stats.allEvents) : null;
+    const matchedEvents = events !== null ? events : 0;
+
     const parts = [];
     if (stats.demo) {
       parts.push('демо-набор');
@@ -767,12 +921,36 @@
       }
     }
     if (articles !== null) parts.push(`${pluralizeNumber(articles)} ${plural(articles, 'публикация', 'публикации', 'публикаций')}`);
-    if (events !== null) parts.push(`${pluralizeNumber(events)} ${plural(events, 'событие', 'события', 'событий')}`);
+    if (filtersActive && allEvents !== null) {
+      parts.push(`${pluralizeNumber(allEvents)} ${plural(allEvents, 'событие', 'события', 'событий')}`);
+    } else if (events !== null) {
+      parts.push(`${pluralizeNumber(events)} ${plural(events, 'событие', 'события', 'событий')}`);
+    }
 
-    const checked = parts.length ? `Проверено ${parts.join(', ')}. ` : '';
-    dom.emptyDetail.textContent =
-      `${checked}Ни одно событие не превысило порог ${state.threshold.toFixed(2)}. ` +
-      'Порог можно снизить — но тогда в список попадёт менее подтверждённое.';
+    let checked = parts.length ? `Проверено ${parts.join(', ')}. ` : '';
+    if (filtersActive && allEvents !== null) {
+      checked = parts.length
+        ? `Проверено ${parts.join(', ')}; по фильтрам совпало ${pluralizeNumber(matchedEvents)}. `
+        : `По фильтрам совпало ${pluralizeNumber(matchedEvents)}. `;
+    }
+    if (filtersActive) {
+      const filterParts = [];
+      if (state.category !== ALL_FILTER) {
+        filterParts.push(`теме «${optionLabel(state.categoryOptions, state.category)}»`);
+      }
+      if (state.city !== ALL_FILTER) {
+        filterParts.push(`городе «${optionLabel(state.cityOptions, state.city)}»`);
+      }
+      const scope = filterParts.length ? `В ${filterParts.join(' и ')}` : '';
+      dom.emptyDetail.textContent =
+        `${checked}${scope} ничего не произошло выше порога ${state.threshold.toFixed(2)}. ` +
+        'Сбросьте фильтры или снизьте порог — но тогда в список попадёт менее подтверждённое.';
+    } else {
+      dom.emptyDetail.textContent =
+        `${checked}Ни одно событие не превысило порог ${state.threshold.toFixed(2)}. ` +
+        'Порог можно снизить — но тогда в список попадёт менее подтверждённое.';
+    }
+    dom.resetFilters.hidden = !filtersActive;
 
     const atMinimum = state.threshold <= MIN_THRESHOLD + 0.0001;
     dom.lowerThreshold.disabled = atMinimum;
@@ -1452,9 +1630,40 @@
   // Действия пользователя
   // ---------------------------------------------------------------------------
 
+  function applyFilterChange() {
+    state.selectedIndex = 0;
+    if (state.view === 'detail') leaveDetailToList();
+    syncControls();
+    syncUrl();
+    hideListError();
+    setStatus('применяю фильтры — загружаю сводку…');
+    loadDigest({ reason: 'filters' });
+  }
+
+  function selectCategory(category) {
+    if (!hasFilterOption(state.categoryOptions, category) || category === state.category) return;
+    state.category = category;
+    applyFilterChange();
+  }
+
+  function selectCity(city) {
+    if (!hasFilterOption(state.cityOptions, city) || city === state.city) return;
+    state.city = city;
+    if (city !== ALL_FILTER) state.region = 'ru';
+    applyFilterChange();
+  }
+
+  function resetFilters() {
+    if (state.category === ALL_FILTER && state.city === ALL_FILTER) return;
+    state.category = ALL_FILTER;
+    state.city = ALL_FILTER;
+    applyFilterChange();
+  }
+
   function selectRegion(region) {
     if (!REGIONS.includes(region) || region === state.region) return;
     state.region = region;
+    if (region !== 'ru' && state.city !== ALL_FILTER) state.city = ALL_FILTER;
     state.selectedIndex = 0;
     syncControls();
     leaveDetailToList();
@@ -1679,6 +1888,22 @@
       });
     });
 
+    if (dom.categorySelect) {
+      dom.categorySelect.addEventListener('change', () => {
+        selectCategory(dom.categorySelect.value);
+      });
+    }
+    if (dom.citySelect) {
+      dom.citySelect.addEventListener('change', () => {
+        selectCity(dom.citySelect.value);
+      });
+    }
+    if (dom.resetFilters) {
+      dom.resetFilters.addEventListener('click', () => {
+        resetFilters();
+      });
+    }
+
     dom.thresholdRange.addEventListener('input', () => {
       commitThreshold(dom.thresholdRange.value, { debounce: true });
     });
@@ -1759,6 +1984,9 @@
 
   function cacheDom() {
     dom.regionButtons = Array.from(document.querySelectorAll('.region-button'));
+    dom.categorySelect = document.getElementById('category-select');
+    dom.citySelect = document.getElementById('city-select');
+    dom.resetFilters = document.getElementById('reset-filters');
     dom.thresholdRange = document.getElementById('threshold-range');
     dom.thresholdValue = document.getElementById('threshold-value');
     dom.refreshButton = document.getElementById('refresh-button');
@@ -1817,7 +2045,11 @@
     const initial = readUrlState();
     state.region = initial.region;
     state.threshold = initial.threshold;
+    state.category = initial.category;
+    state.city = initial.city;
+    if (state.city !== ALL_FILTER) state.region = 'ru';
 
+    rebuildFilterSelects();
     syncControls();
     bindEvents();
 

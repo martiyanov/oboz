@@ -60,6 +60,8 @@ export function parseRss(xml, source) {
       categories,
       author,
       region: deriveRegion(source, categories, title),
+      sourceTopics: Array.isArray(source.topics) ? source.topics : [],
+      sourceCity: source.city || null,
     });
   }
   return items;

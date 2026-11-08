@@ -7,6 +7,7 @@ import { formatDigest, formatEmpty, formatDossier, formatSourcesTable, publicEve
 import { runWatch } from './watch.js';
 import { runTui } from './tui.js';
 import { parseDuration, formatDateTimeRu } from './util.js';
+import { loadTopics, categoryList, cityList } from './topics.js';
 import { ROOT } from './paths.js';
 
 class UserError extends Error {
@@ -16,7 +17,7 @@ class UserError extends Error {
   }
 }
 
-const VALUE_FLAGS = new Set(['region', 'threshold', 'limit', 'every', 'cache-dir', 'width']);
+const VALUE_FLAGS = new Set(['region', 'threshold', 'limit', 'every', 'cache-dir', 'width', 'category', 'city']);
 const REGIONS = ['ru', 'world', 'all'];
 
 function parseArgs(argv) {
@@ -68,6 +69,22 @@ function parseRegion(value, fallback) {
   return value;
 }
 
+async function parseCategory(value) {
+  if (value === undefined) return 'all';
+  if (value === true || value === '') throw new UserError('--category требует значение, например --category tech');
+  const catalog = await loadTopics();
+  if (value === 'all' || catalog.categoryIds.has(value)) return value;
+  throw new UserError(`Неизвестная тема «${value}». Доступно: ${categoryList(catalog).map((item) => item.id).join(', ')}`);
+}
+
+async function parseCity(value) {
+  if (value === undefined) return 'all';
+  if (value === true || value === '') throw new UserError('--city требует значение, например --city moscow');
+  const catalog = await loadTopics();
+  if (value === 'all' || catalog.cityIds.has(value)) return value;
+  throw new UserError(`Неизвестный город «${value}». Доступно: ${cityList(catalog).map((item) => item.id).join(', ')}`);
+}
+
 function parseLimit(value, fallback) {
   if (value === undefined) return fallback;
   if (value === true || value === '') throw new UserError('--limit требует число, например --limit 12');
@@ -98,6 +115,9 @@ const HELP = `ОБОЗРЕВАТЕЛЬ — терминальный сторож
 
 ФЛАГИ
   --region ru|world|all       регион повестки (по умолчанию ru)
+  --category all|tech|music|… тема: politics, economy, society, tech, music,
+                              culture, science, sport, incidents (или all)
+  --city all|moscow|nizhny    город: Москва или Нижний Новгород
   --threshold 0.55            порог значимости 0..1
   --limit 12                  сколько событий показать
   --json                      машинный вывод (news)
@@ -112,6 +132,8 @@ const HELP = `ОБОЗРЕВАТЕЛЬ — терминальный сторож
 
 ПРИМЕРЫ
   oboz news --region ru --threshold 0.6
+  oboz news --category tech
+  oboz news --city moscow --threshold 0.5
   oboz news --region world --explain
   oboz watch --every 1h --quiet
   oboz tui
@@ -123,6 +145,8 @@ async function cmdNews(flags) {
   const region = parseRegion(flags.region, config.region);
   const threshold = parseThreshold(flags.threshold);
   const limit = parseLimit(flags.limit, config.limit);
+  const category = await parseCategory(flags.category);
+  const city = await parseCity(flags.city);
   const spinner = !flags.json && process.stderr.isTTY;
   if (spinner) process.stderr.write('Загружаю ленты…\r');
   const digest = await buildDigest({
@@ -132,6 +156,8 @@ async function cmdNews(flags) {
     demo: Boolean(flags.demo),
     noCache: Boolean(flags['no-cache']),
     wiki: Boolean(flags.wiki),
+    category,
+    city,
   });
   if (spinner) process.stderr.write('\r\x1b[K');
 
@@ -145,6 +171,9 @@ async function cmdNews(flags) {
       generatedAt: new Date(digest.generatedAt).toISOString(),
       region: digest.region,
       threshold: digest.threshold,
+      category: digest.category,
+      city: digest.city,
+      filters: digest.filters,
       empty: digest.empty,
       stats: digest.stats,
       passed: digest.passed.map(publicEvent),

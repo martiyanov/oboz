@@ -7,6 +7,9 @@ import { extractClaims, detectConflicts, attributionSignals, wikipediaFor } from
 import { demoArticles } from './demo.js';
 import { WIKI_CACHE_DIR } from './paths.js';
 import { round } from './util.js';
+import {
+  loadTopics, classifyArticle, filterByCategoryCity, categoryList, cityList,
+} from './topics.js';
 
 function cleanOverrides(overrides) {
   const out = {};
@@ -32,6 +35,9 @@ export async function buildDigest(options = {}) {
   const threshold = options.threshold ?? config.threshold ?? 0.55;
   const region = options.region ?? config.region ?? 'ru';
   const limit = options.limit ?? config.limit ?? 12;
+  const category = options.category && options.category !== 'all' ? options.category : 'all';
+  const city = options.city && options.city !== 'all' ? options.city : 'all';
+  const catalog = await loadTopics();
 
   let articles = [];
   let sourceStats = { total: 0, ok: 0, failed: 0, cached: 0, stale: 0, failedSources: [], articles: 0 };
@@ -49,13 +55,27 @@ export async function buildDigest(options = {}) {
   }
 
   const maxAgeMs = (config.maxAgeHours ?? 36) * 3_600_000;
-  const normalized = [];
+  const maxPerSource = config.maxArticlesPerSource ?? 150;
+
+  // Сначала отбираем свежие публикации, затем ограничиваем по источнику (самые новые важнее).
+  const bySource = new Map();
   for (const article of articles) {
     if (!article.title) continue;
     const publishedAt = article.publishedAt || now;
     if (now - publishedAt > maxAgeMs) continue;
     if (publishedAt > now + 6 * 3_600_000) continue; // будущее из-за кривых часов — отбрасываем
-    normalized.push({ ...article, publishedAt });
+    const key = article.sourceId || 'unknown';
+    if (!bySource.has(key)) bySource.set(key, []);
+    bySource.get(key).push({ ...article, publishedAt });
+  }
+
+  const normalized = [];
+  for (const list of bySource.values()) {
+    list.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
+    for (const article of list.slice(0, maxPerSource)) {
+      const { topics, cities } = classifyArticle(article, catalog);
+      normalized.push({ ...article, topics, cities });
+    }
   }
 
   const clusters = clusterArticles(normalized);
@@ -86,7 +106,9 @@ export async function buildDigest(options = {}) {
   const scoped = evaluated.filter((event) => region === 'all' || event.scope.includes(region));
   scoped.sort((a, b) => b.score - a.score || (b.latestAt || 0) - (a.latestAt || 0));
 
-  const passed = scoped.filter((event) => event.passed);
+  const matching = filterByCategoryCity(scoped, { category, city });
+
+  const passed = matching.filter((event) => event.passed);
   const covered = passed.slice(0, limit);
 
   if (options.wiki) {
@@ -98,11 +120,15 @@ export async function buildDigest(options = {}) {
   }
 
   const relevant = passed.length;
+  const categoryInfo = categoryList(catalog).find((item) => item.id === category)
+    || { id: category, label: category };
+  const cityInfo = cityList(catalog).find((item) => item.id === city) || { id: city, label: city };
   const stats = {
     articlesRaw: sourceStats.articles || articles.length,
     articlesUsed: normalized.length,
     clusters: clusters.length,
-    events: scoped.length,
+    events: matching.length,
+    allEvents: scoped.length,
     passed: relevant,
     shown: covered.length,
     sourcesTotal: sourceStats.total,
@@ -118,11 +144,17 @@ export async function buildDigest(options = {}) {
     generatedAt: now,
     region,
     threshold: round(threshold, 3),
+    category,
+    city,
+    filters: { category: categoryInfo, city: cityInfo },
+    categories: categoryList(catalog),
+    cities: cityList(catalog),
     config,
     stats,
     passed: covered,
-    events: scoped,
-    rejected: scoped.filter((event) => !event.passed).slice(0, 12),
+    events: matching,
+    allEvents: scoped,
+    rejected: matching.filter((event) => !event.passed).slice(0, 12),
     empty: covered.length === 0,
   };
 }

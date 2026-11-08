@@ -119,6 +119,29 @@ test('web: digest уважает region/threshold/limit', async () => {
   assert.ok(limited.passed.length <= 6);
 });
 
+test('web: фильтры category/city и мета-каталог', async () => {
+  const base = await (await fetch(`${BASE}/api/digest?region=ru`)).json();
+  assert.equal(base.category, 'all');
+  assert.equal(base.city, 'all');
+  assert.ok(Array.isArray(base.meta.categories));
+  assert.ok(base.meta.categories.some((item) => item.id === 'tech' && item.label === 'Технологии'));
+  assert.ok(base.meta.categories.some((item) => item.id === 'music'));
+  assert.ok(base.meta.cities.some((item) => item.id === 'moscow' && item.label === 'Москва'));
+  assert.ok(base.meta.cities.some((item) => item.id === 'nizhny' && item.label === 'Нижний Новгород'));
+
+  const tech = await (await fetch(`${BASE}/api/digest?region=ru&category=tech`)).json();
+  assert.equal(tech.category, 'tech');
+  for (const event of tech.passed) assert.ok(event.topics.includes('tech'));
+
+  const city = await (await fetch(`${BASE}/api/digest?region=ru&city=moscow`)).json();
+  assert.equal(city.city, 'moscow');
+  for (const event of city.passed) assert.ok(event.cities.includes('moscow'));
+
+  const bad = await (await fetch(`${BASE}/api/digest?region=ru&category=nonsense&city=ufa`)).json();
+  assert.equal(bad.category, 'all');
+  assert.equal(bad.city, 'all');
+});
+
 test('web: /api/event/<id> отдаёт досье, /api/sources — каталог', async () => {
   const digest = await (await fetch(`${BASE}/api/digest?region=ru`)).json();
   const id = digest.passed[0].id;
@@ -130,9 +153,11 @@ test('web: /api/event/<id> отдаёт досье, /api/sources — катал�
   assert.ok(data.event.claims.length >= 1);
 
   const sources = await (await fetch(`${BASE}/api/sources`)).json();
-  assert.equal(sources.stats.total, 20);
-  assert.equal(sources.stats.enabled, 20);
-  assert.equal(sources.sources.length, 20);
+  assert.equal(sources.stats.total, 32);
+  assert.equal(sources.stats.enabled, 32);
+  assert.equal(sources.sources.length, 32);
+  assert.ok(sources.sources.some((source) => source.city === 'moscow'));
+  assert.ok(sources.sources.some((source) => source.city === 'nizhny'));
 });
 
 test('web: неизвестные пути и методы не ломают сервер', async () => {

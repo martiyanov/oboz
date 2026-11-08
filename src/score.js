@@ -2,6 +2,7 @@
 import { clamp, round } from './util.js';
 
 const TIER_DEFAULT = { A: 1.0, B: 0.85, C: 0.6 };
+const SPECIALIZED_TOPICS = new Set(['tech', 'music', 'culture', 'science', 'sport']);
 const BASE_WEIGHTS = { severity: 0.4, corroboration: 0.25, recency: 0.15, confidence: 0.2 };
 
 export function severityOf(text, config = {}) {
@@ -80,7 +81,12 @@ export function evaluateEvent(cluster, config = {}, now = Date.now(), evidence =
   const minDomains = config.minDomains ?? 2;
   const minConfidence = config.minConfidence ?? 0.5;
 
-  const severity = severityOf(`${cluster.title} ${cluster.summary}`, config);
+  let severity = severityOf(`${cluster.title} ${cluster.summary}`, config);
+  // Тематические (не политические) события редко попадают в «жёсткие» новостные ключевые слова:
+  // даём им базовую значимость, чтобы категории «Технологии»/«Музыка» не были пустыми.
+  if ((cluster.topics || []).some((topic) => SPECIALIZED_TOPICS.has(topic))) {
+    severity = Math.max(severity, config.specializedSeverityFloor ?? 0.35);
+  }
   const tierAvg = tierAverage(cluster.articles, tierWeights);
   const domainsCount = cluster.domains.length;
   const corroboration = corroborationOf(domainsCount, tierAvg);

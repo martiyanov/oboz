@@ -101,10 +101,12 @@ test('CLI: news --demo --json — валидный JSON со stats/passed/reject
     const payload = JSON.parse(result.stdout);
     assert.deepEqual(
       Object.keys(payload),
-      ['generatedAt', 'region', 'threshold', 'empty', 'stats', 'passed', 'rejected'],
+      ['generatedAt', 'region', 'threshold', 'category', 'city', 'filters', 'empty', 'stats', 'passed', 'rejected'],
     );
     assert.equal(payload.region, 'ru');
     assert.equal(payload.threshold, 0.55);
+    assert.equal(payload.category, 'all');
+    assert.equal(payload.city, 'all');
     assert.equal(payload.empty, false);
     assert.ok(!Number.isNaN(Date.parse(payload.generatedAt)));
     assert.equal(payload.stats.demo, true);
@@ -340,4 +342,31 @@ test('TUI headless: стартовый экран, досье и тезисы о
   assert.match(result.stdout, /===== Досье события \(Enter\) =====/);
   assert.match(result.stdout, /ТЕЗИСЫ/);
   assert.match(result.stdout, /ПРОВЕРКА/);
+});
+
+
+test('CLI: --category и --city фильтруют события, неизвестная тема — код 2', () => {
+  const ws = makeWorkspace();
+  try {
+    const tech = runCli(['news', '--demo', '--json', '--category', 'tech'], { workspace: ws });
+    assert.equal(tech.status, 0, tech.stderr);
+    const techPayload = JSON.parse(tech.stdout);
+    assert.equal(techPayload.category, 'tech');
+    assert.equal(techPayload.stats.events, 0);
+    assert.equal(techPayload.empty, true);
+
+    const moscow = runCli(['news', '--demo', '--json', '--city', 'moscow'], { workspace: ws });
+    assert.equal(moscow.status, 0, moscow.stderr);
+    assert.equal(JSON.parse(moscow.stdout).city, 'moscow');
+
+    const bad = runCli(['news', '--demo', '--category', 'nonsense'], { workspace: ws });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /Неизвестная тема/);
+
+    const badCity = runCli(['news', '--demo', '--city', 'ufa'], { workspace: ws });
+    assert.equal(badCity.status, 2);
+    assert.match(badCity.stderr, /Неизвестный город/);
+  } finally {
+    ws.cleanup();
+  }
 });
