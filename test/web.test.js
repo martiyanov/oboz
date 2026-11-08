@@ -78,9 +78,11 @@ test('web: статика index/app.js/style.css и относительные �
   assert.match(html, /ОБОЗРЕВАТЕЛЬ/i);
   assert.ok(!/src="\//.test(html), 'скрипты должны быть относительными (работа под /oboz/)');
   assert.ok(!/href="\//.test(html), 'стили должны быть относительными');
+  assert.match(html, /id="theme-toggle"/, 'в шапке есть переключатель темы');
+  assert.match(html, /src="theme\.js"/, 'theme.js подключается до отрисовки');
   assert.match(index.headers.get('content-security-policy') || '', /default-src 'self'/);
 
-  for (const [file, type] of [['app.js', /javascript/], ['style.css', /text\/css/], ['favicon.svg', /svg/]]) {
+  for (const [file, type] of [['app.js', /javascript/], ['theme.js', /javascript/], ['style.css', /text\/css/], ['favicon.svg', /svg/]]) {
     const res = await fetch(`${BASE}/${file}`);
     assert.equal(res.status, 200, `${file} должен отдаваться`);
     assert.match(res.headers.get('content-type') || '', type);

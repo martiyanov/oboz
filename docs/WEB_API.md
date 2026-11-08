@@ -2,7 +2,7 @@
 
 Веб-версия — тонкая оболочка над тем же ядром (`src/digest.js`): никакой второй логики оценки,
 никаких внешних CDN и зависимостей. Сервер — `web/server.mjs` (Node, `node:http`), статика —
-`web/public/` (`index.html`, `app.js`, `style.css`, `favicon.svg`).
+`web/public/` (`index.html`, `app.js`, `style.css`, `theme.js`, `favicon.svg`).
 
 Публичный адрес: `https://agonarena.ru/oboz/` (nginx снимает префикс `/oboz/`, приложение видит
 корень `/`). Поэтому **все запросы из браузера — относительные** (`api/digest`, `app.js`), без
@@ -90,7 +90,7 @@
 
 ## Требования к интерфейсу (`web/public/`)
 
-Файлы: `index.html`, `app.js`, `style.css`, `favicon.svg`. **Без npm, без CDN, без внешних
+Файлы: `index.html`, `app.js`, `style.css`, `theme.js`, `favicon.svg`. **Без npm, без CDN, без внешних
 шрифтов и картинок** — только системные шрифты (`-apple-system, Segoe UI, Roboto…`) и инлайн SVG.
 
 1. **Тёмная тема**, ощущение терминального обозревателя: моноширинный акцент для цифр/оценок,

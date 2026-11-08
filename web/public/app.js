@@ -112,6 +112,18 @@
     return Number.isFinite(n) ? n.toFixed(2) : '—';
   }
 
+  /* Оценка события для людей: двузначное число из 100. */
+  function formatScore100(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return String(Math.round(clampNumber(n, 0, 1) * 100));
+  }
+
+  function scoreAriaLabel(value) {
+    const text = formatScore100(value);
+    return text === '—' ? 'Оценка не определена' : `Оценка ${text} из 100`;
+  }
+
   function scoreBand(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'score-low';
@@ -554,18 +566,20 @@
     card.setAttribute('role', 'option');
     card.setAttribute('aria-selected', 'false');
     card.tabIndex = -1;
-    card.setAttribute(
-      'aria-label',
-      `${event.title || 'Без заголовка'}. Оценка ${formatScore(event.score)}`,
-    );
+    card.setAttribute('aria-label', `${scoreAriaLabel(event.score)}. ${event.title || 'Без заголовка'}`);
+
+    const scoreWrap = el('span', 'event-score-wrap');
+    const score = el('span', `event-score ${scoreBand(event.score)}`, formatScore100(event.score));
+    score.dataset.testid = 'event-score';
+    score.setAttribute('aria-label', scoreAriaLabel(event.score));
+    score.title = scoreAriaLabel(event.score);
+    const scoreSep = el('span', 'event-score-sep', '|');
+    scoreSep.setAttribute('aria-hidden', 'true');
+    scoreWrap.append(score, scoreSep);
 
     const main = el('span', 'event-main');
 
     const head = el('span', 'event-head');
-    const score = el('span', `event-score ${scoreBand(event.score)}`, `[${formatScore(event.score)}]`);
-    score.dataset.testid = 'event-score';
-    head.append(score);
-
     if (event.attribution && event.attribution.official) {
       const official = el('span', 'official-badge', 'официальный первоисточник');
       official.dataset.testid = 'official-badge';
@@ -633,7 +647,7 @@
     main.append(head, title);
     if (event.summary) main.append(summary);
     main.append(meta);
-    card.append(main, el('span', 'event-arrow', '▸'));
+    card.append(scoreWrap, main, el('span', 'event-arrow', '▸'));
     li.append(card);
     return li;
   }
@@ -779,7 +793,7 @@
     dom.rejectedBlock.hidden = false;
     rejected.forEach((item) => {
       const li = el('li', 'rejected-item');
-      const score = el('span', 'rejected-score', `[${formatScore(item.score)}]`);
+      const score = el('span', 'rejected-score', formatScore100(item.score));
       const text = el('span', 'rejected-text', item.title || '(без заголовка)');
       if (typeof item.score === 'number') score.title = 'оценка ниже порога';
       const reasons = Array.isArray(item.reasons) ? item.reasons.filter(Boolean) : [];
@@ -938,18 +952,32 @@
     return null;
   }
 
-  function supportNames(event, support) {
-    const names = [];
+  function supportLinks(event, support) {
+    const entries = [];
     const seen = new Set();
     for (const link of support) {
       const href = safeExternalUrl(link);
-      const name = href ? sourceNameByLink(event, href) : null;
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      names.push(name);
-      if (names.length >= 4) break;
+      if (!href || seen.has(href)) continue;
+      seen.add(href);
+      entries.push({ name: sourceNameByLink(event, href) || 'источник', url: href });
     }
-    return names;
+    return entries;
+  }
+
+  /* Публикация, в заголовке/лиде которой встречается официальный маркер. */
+  function articleForOfficialMarkers(event, markers) {
+    const articles = Array.isArray(event.articles)
+      ? event.articles.filter((article) => article && safeExternalUrl(article.link))
+      : [];
+    if (!articles.length) return null;
+    const needles = markers.map((marker) => String(marker || '').toLowerCase()).filter(Boolean);
+    if (needles.length) {
+      for (const article of articles) {
+        const hay = `${article.title || ''} ${article.excerpt || ''} ${article.summary || ''}`.toLowerCase();
+        if (needles.some((needle) => hay.includes(needle))) return article;
+      }
+    }
+    return articles[0];
   }
 
   function buildSection(title, countText) {
@@ -968,9 +996,11 @@
     const scoreValue = el(
       'span',
       `detail-score ${scoreBand(event.score)}`,
-      `[${formatScore(event.score)}]`,
+      formatScore100(event.score),
     );
     scoreValue.dataset.testid = 'detail-score';
+    scoreValue.setAttribute('aria-label', scoreAriaLabel(event.score));
+    scoreValue.title = scoreAriaLabel(event.score);
     scoreWrap.append(scoreValue, el('span', 'detail-score-label', 'оценка'));
     hero.append(scoreWrap);
 
@@ -983,6 +1013,9 @@
     const sourceCount = countSources(event);
     const subline = el('p', 'detail-subline');
     subline.dataset.testid = 'detail-meta';
+    const metaPipe = el('span', 'detail-score-sep', '|');
+    metaPipe.setAttribute('aria-hidden', 'true');
+    subline.append(metaPipe, document.createTextNode(' '));
     subline.append(
       document.createTextNode(
         `${sourceCount} ${plural(sourceCount, 'независимый источник', 'независимых источника', 'независимых источников')}`,
@@ -999,11 +1032,21 @@
     const attribution = event.attribution && typeof event.attribution === 'object' ? event.attribution : {};
     if (attribution.official) {
       const markers = Array.isArray(attribution.markers) ? attribution.markers.filter(Boolean) : [];
-      const badge = el(
-        'span',
-        'official-badge',
-        markers.length ? `официальный первоисточник: ${markers.slice(0, 4).join(', ')}` : 'официальный первоисточник',
-      );
+      const badgeText = markers.length
+        ? `официальный первоисточник: ${markers.slice(0, 4).join(', ')}`
+        : 'официальный первоисточник';
+      const markerArticle = articleForOfficialMarkers(event, markers);
+      const markerHref = markerArticle ? safeExternalUrl(markerArticle.link) : null;
+      let badge;
+      if (markerHref) {
+        badge = el('a', 'official-badge official-badge-link', badgeText);
+        badge.href = markerHref;
+        badge.target = '_blank';
+        badge.rel = 'noopener noreferrer';
+        badge.title = `Открыть публикацию: ${markerArticle.sourceName || markerArticle.sourceId || 'первоисточник'}`;
+      } else {
+        badge = el('span', 'official-badge', badgeText);
+      }
       badge.dataset.testid = 'official-badge';
       badges.append(badge);
     }
@@ -1047,7 +1090,21 @@
       item.append(el('span', 'claim-index', `${index + 1}.`));
 
       const body = el('div', 'claim-body');
-      body.append(el('p', 'claim-text', claim.text || ''));
+      const support = Array.isArray(claim.support) ? claim.support.filter(Boolean) : [];
+      const supportEntries = supportLinks(event, support);
+      const firstSupport = supportEntries.length ? supportEntries[0].url : null;
+
+      if (firstSupport) {
+        const claimLink = el('a', 'claim-text claim-text-link', claim.text || '');
+        claimLink.href = firstSupport;
+        claimLink.target = '_blank';
+        claimLink.rel = 'noopener noreferrer';
+        claimLink.title = 'Открыть источник тезиса';
+        claimLink.dataset.testid = 'claim-source-link';
+        body.append(claimLink);
+      } else {
+        body.append(el('p', 'claim-text', claim.text || ''));
+      }
 
       const meta = el('div', 'claim-meta');
       const kind = CLAIM_KINDS[claim.kind] ? claim.kind : 'statement';
@@ -1059,11 +1116,23 @@
         meta.append(el('span', 'number-chip', formatNumberValue(number.value, number.unit)));
       });
 
-      const support = Array.isArray(claim.support) ? claim.support.filter(Boolean) : [];
-      const names = supportNames(event, support);
-      if (names.length) {
-        const suffix = support.length > names.length ? ` +${support.length - names.length}` : '';
-        meta.append(el('span', 'claim-support', `подтверждают: ${names.join(', ')}${suffix}`));
+      if (supportEntries.length) {
+        const supportLine = el('span', 'claim-support');
+        supportLine.append(document.createTextNode('подтверждают: '));
+        const limit = 6;
+        supportEntries.slice(0, limit).forEach((entry, entryIndex) => {
+          if (entryIndex) supportLine.append(document.createTextNode(', '));
+          const supportLink = el('a', 'claim-support-link', entry.name);
+          supportLink.href = entry.url;
+          supportLink.target = '_blank';
+          supportLink.rel = 'noopener noreferrer';
+          supportLink.dataset.testid = 'claim-support-link';
+          supportLine.append(supportLink);
+        });
+        if (supportEntries.length > limit) {
+          supportLine.append(document.createTextNode(` +${supportEntries.length - limit}`));
+        }
+        meta.append(supportLine);
       } else if (support.length) {
         meta.append(el('span', 'claim-support', `подтверждений: ${support.length}`));
       } else {
@@ -1261,13 +1330,23 @@
     const officialItem = el('div', 'check-item');
     officialItem.append(el('div', 'check-label', 'официальный первоисточник'));
     if (attribution.official) {
-      officialItem.append(
-        el(
-          'div',
-          'check-value is-positive',
-          markers.length ? `да — ${markers.join(', ')}` : 'да — найдены официальные маркеры',
-        ),
+      const officialValue = el(
+        'div',
+        'check-value is-positive',
+        markers.length ? `да — ${markers.join(', ')}` : 'да — найдены официальные маркеры',
       );
+      const markerArticle = articleForOfficialMarkers(event, markers);
+      const markerHref = markerArticle ? safeExternalUrl(markerArticle.link) : null;
+      if (markerHref) {
+        const checkLink = el('a', 'check-link', markerArticle.sourceName || 'открыть публикацию');
+        checkLink.href = markerHref;
+        checkLink.target = '_blank';
+        checkLink.rel = 'noopener noreferrer';
+        checkLink.title = 'Открыть публикацию с официальным маркером';
+        checkLink.dataset.testid = 'check-official-link';
+        officialValue.append(document.createTextNode(' · '), checkLink);
+      }
+      officialItem.append(officialValue);
     } else {
       officialItem.append(el('div', 'check-value is-negative', 'не найден'));
     }

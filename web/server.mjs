@@ -165,6 +165,7 @@ async function getAllEvents() {
 const STATIC_FILES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
   '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/theme.js': { file: 'theme.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
   '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8', cache: 'public, max-age=300' },
   '/favicon.svg': { file: 'favicon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },

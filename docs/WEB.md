@@ -30,11 +30,19 @@ systemd-сервис oboz-web  (node web/server.mjs, 127.0.0.1:8788)
 | Путь | Назначение |
 |---|---|
 | `web/server.mjs` | HTTP-сервер без зависимостей: API, статика, кэш, healthz |
-| `web/public/` | `index.html`, `app.js`, `style.css`, `favicon.svg` — сам интерфейс |
+| `web/public/` | `index.html`, `app.js`, `style.css`, `theme.js`, `favicon.svg` — сам интерфейс |
 | `deploy/oboz-web.service` | systemd-юнит (User=openclaw, порт 127.0.0.1:8788) |
 | `deploy/nginx-oboz.conf` | nginx-snippet с `location /oboz/` |
 | `scripts/deploy-web.sh` | обновление: rsync + перезапуск сервиса |
 | `docs/WEB_API.md` | контракт API и требования к UI |
+
+## Темы
+
+Светлая и тёмная темы переключаются кнопкой в шапке (иконка солнца/луны). Выбор хранится в
+`localStorage['oboz-theme']`; если пользователь ещё не выбирал тему, интерфейс следует системной
+(`prefers-color-scheme`) и реагирует на её смену. `theme.js` подключается синхронно в `<head>`,
+поэтому тема применяется до первой отрисовки — без вспышки. `meta[name="theme-color"]` меняется
+вместе с темой (#fafaf8 / #0b0d0c).
 
 ## API
 
