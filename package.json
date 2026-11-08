@@ -1,0 +1,18 @@
+{
+  "name": "obozrevatel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Обозреватель — терминальный сторож новостей: показывает только значимые и подтверждённые события, с порогом и разбором доказательств",
+  "type": "module",
+  "bin": {
+    "oboz": "./oboz"
+  },
+  "scripts": {
+    "start": "node ./oboz",
+    "test": "node --test test/",
+    "sources": "node ./oboz sources"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

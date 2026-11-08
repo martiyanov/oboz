@@ -1,0 +1,30 @@
+{
+  "id": "e5f6a7b8",
+  "title": "Цены в России растут быстрее прогноза",
+  "summary": "Годовая инфляция достигла 8%, сообщил ЦБ.",
+  "entities": ["Инфляция", "Банк России"],
+  "articles": [
+    {
+      "sourceId": "vedomosti",
+      "sourceName": "Ведомости",
+      "domain": "vedomosti.ru",
+      "tier": "A",
+      "type": "independent",
+      "title": "Цены в России растут быстрее прогноза",
+      "excerpt": "Инфляция составила 8%, сообщил ЦБ.",
+      "link": "https://www.vedomosti.ru/economics/articles/2026/11/08/000001",
+      "publishedAt": 1794129060000
+    },
+    {
+      "sourceId": "rbc",
+      "sourceName": "РБК",
+      "domain": "rbc.ru",
+      "tier": "B",
+      "type": "business",
+      "title": "Выборы прошли при высокой явке",
+      "excerpt": "Явка достигла 70%, сообщил ЦИК.",
+      "link": "https://www.rbc.ru/politics/08/11/2026/000002",
+      "publishedAt": 1794129600000
+    }
+  ]
+}

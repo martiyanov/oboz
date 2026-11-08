@@ -1,0 +1,41 @@
+{
+  "id": "a1b2c3d4",
+  "title": "Мужчина погиб при атаке БПЛА в Курской области",
+  "summary": "&laquo;В результате атаки украинского дрона погиб 1 человек&raquo;, — сообщил губернатор Курской области.",
+  "entities": ["Курская область", "Хинштейн", "БПЛА"],
+  "articles": [
+    {
+      "sourceId": "interfax",
+      "sourceName": "Интерфакс",
+      "domain": "interfax.ru",
+      "tier": "A",
+      "type": "state-agency",
+      "title": "Мужчина погиб при атаке БПЛА в Курской области",
+      "excerpt": "&laquo;В результате атаки украинского дрона погиб 1 человек&raquo;, — сообщил губернатор Курской области.",
+      "link": "https://www.interfax.ru/russia/1127652",
+      "publishedAt": 1794129060000
+    },
+    {
+      "sourceId": "tass",
+      "sourceName": "ТАСС",
+      "domain": "tass.ru",
+      "tier": "A",
+      "type": "state-agency",
+      "title": "При атаке БПЛА в Курской области погибли 2 человека",
+      "excerpt": "По данным Минобороны, погибли 2 человека; ещё 3 человека пострадали.",
+      "link": "https://tass.ru/proisshestviya/22500001",
+      "publishedAt": 1794129600000
+    },
+    {
+      "sourceId": "bbc",
+      "sourceName": "BBC",
+      "domain": "bbc.com",
+      "tier": "A",
+      "type": "foreign",
+      "title": "Атака дрона в Курской области: погиб 1 человек",
+      "excerpt": "Губернатор сообщил, что при атаке дрона погиб 1 человек. Ещё 3 человека пострадали.",
+      "link": "https://www.bbc.com/russian/articles/c1234567890o",
+      "publishedAt": 1794130200000
+    }
+  ]
+}
