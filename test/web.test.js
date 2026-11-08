@@ -157,6 +157,21 @@ test('web: фильтры category/city и мета-каталог', async () =>
   assert.equal(bad.city, 'all');
 });
 
+test('web: фильтр q по ключевым словам (закладки)', async () => {
+  const filtered = await (await fetch(`${BASE}/api/digest?region=ru&q=${encodeURIComponent('Курск')}`)).json();
+  assert.deepEqual(filtered.query, ['курск']);
+  assert.equal(filtered.stats.events, 1);
+  assert.equal(filtered.passed.length, 1);
+  assert.match(filtered.passed[0].title, /Курск/i);
+
+  const none = await (await fetch(`${BASE}/api/digest?region=ru&q=${encodeURIComponent('музыка')}`)).json();
+  assert.equal(none.empty, true);
+  assert.equal(none.passed.length, 0);
+
+  const bad = await (await fetch(`${BASE}/api/digest?region=ru&q=${encodeURIComponent('!!!')}`)).json();
+  assert.deepEqual(bad.query, []);
+});
+
 test('web: /api/event/<id> отдаёт досье, /api/sources — каталог', async () => {
   const digest = await (await fetch(`${BASE}/api/digest?region=ru`)).json();
   const id = digest.passed[0].id;

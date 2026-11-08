@@ -42,6 +42,9 @@ export function formatDigest(digest, options = {}) {
   if (digest.city && digest.city !== 'all' && digest.filters?.city?.label) {
     filterParts.push(`город: ${digest.filters.city.label}`);
   }
+  if (Array.isArray(digest.query) && digest.query.length) {
+    filterParts.push(`поиск: ${digest.query.join(', ')}`);
+  }
   const filterSuffix = filterParts.length ? ` · ${filterParts.join(' · ')}` : '';
   const lines = [];
   lines.push(`ОБОЗРЕВАТЕЛЬ · ${regionName.toUpperCase()}${filterSuffix} · ${formatDateTimeRu(digest.generatedAt)} · порог ${digest.threshold.toFixed(2)}`);

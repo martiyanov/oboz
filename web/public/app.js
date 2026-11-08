@@ -54,6 +54,24 @@
     { id: 'nizhny', label: 'Нижний Новгород' },
   ];
 
+  const BOOKMARKS_KEY = 'oboz-bookmarks-v1';
+  const ACTIVE_BOOKMARK_KEY = 'oboz-active-bookmark';
+  const MAX_BOOKMARK_KEYWORDS = 6;
+  const MAX_BOOKMARK_NAME = 80;
+  const MAX_SEEN_IDS = 300;
+  const BOOKMARK_NOTIFICATION_TITLE = 'Новые новости по закладке';
+  const BOOKMARK_NOTIFICATION_MIN_INTERVAL_MS = 60000;
+  const BOOKMARK_STOP_WORDS = new Set([
+    'в', 'во', 'и', 'на', 'после', 'по', 'с', 'со', 'из', 'от', 'до', 'за', 'под', 'над', 'при',
+    'для', 'что', 'как', 'это', 'его', 'ее', 'её', 'их', 'был', 'была', 'было', 'были', 'будет',
+    'а', 'но', 'или', 'не', 'без', 'более', 'уже', 'еще', 'ещё', 'также', 'который', 'которая',
+    'которые', 'о', 'об', 'про', 'через', 'между', 'ко', 'же', 'ли', 'бы', 'то', 'так', 'только',
+    'даже', 'чем', 'тогда', 'когда', 'где', 'там', 'тут', 'сейчас', 'сегодня', 'вчера', 'заявил',
+    'заявила', 'заявили', 'сообщил', 'сообщила', 'сообщили', 'рассказал', 'рассказала', 'рассказали',
+    'может', 'можно', 'нужно', 'стал', 'стала', 'стали', 'один', 'два', 'три', 'под', 'the', 'and',
+    'for', 'with', 'from', 'that', 'this', 'news', 'после', 'около', 'почти', 'снова', 'уже',
+  ]);
+
   // ---------------------------------------------------------------------------
   // Состояние
   // ---------------------------------------------------------------------------
@@ -63,9 +81,18 @@
     threshold: DEFAULT_THRESHOLD,
     category: ALL_FILTER,
     city: ALL_FILTER,
+    query: [],
     categoryOptions: FALLBACK_CATEGORIES.map((item) => ({ id: item.id, label: item.label })),
     cityOptions: FALLBACK_CITIES.map((item) => ({ id: item.id, label: item.label })),
     filterSignature: '',
+    bookmarks: [],
+    activeBookmarkId: null,
+    bookmarkBadgeCount: 0,
+    bookmarkEditingId: null,
+    bookmarkDraftEventId: null,
+    bookmarksSource: 'header',
+    lastNotificationAt: 0,
+    bookmarksReturnFocus: null,
     view: 'list', // 'list' | 'detail'
     data: null,
     events: [],
@@ -221,9 +248,421 @@
 
   function activeFilterSuffix() {
     const parts = [];
+    if (state.query.length) {
+      const bookmark = getActiveBookmark();
+      parts.push(bookmark ? `закладка «${bookmark.name}»` : `поиск «${state.query.join(', ')}»`);
+    }
     if (state.category !== ALL_FILTER) parts.push(`тема «${optionLabel(state.categoryOptions, state.category)}»`);
     if (state.city !== ALL_FILTER) parts.push(`город «${optionLabel(state.cityOptions, state.city)}»`);
     return parts.length ? ` · ${parts.join(' · ')}` : '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Закладки: UI, фильтрация и уведомления
+  // ---------------------------------------------------------------------------
+
+  function updateBookmarkBadge() {
+    if (!dom.bookmarksBadge) return;
+    const count = Math.max(0, Number(state.bookmarkBadgeCount) || 0);
+    dom.bookmarksBadge.textContent = String(count);
+    dom.bookmarksBadge.hidden = count === 0;
+    if (dom.bookmarksButton) {
+      dom.bookmarksButton.setAttribute('aria-label', count ? `Закладки, новых: ${count}` : 'Закладки');
+    }
+  }
+
+  function resetBookmarksBadge() {
+    state.bookmarkBadgeCount = 0;
+    updateBookmarkBadge();
+  }
+
+  function updateActiveBookmarkChip() {
+    if (!dom.activeBookmarkRow || !dom.activeBookmark || !dom.activeBookmarkText) return;
+    const active = state.query.length > 0;
+    dom.activeBookmarkRow.hidden = !active;
+    if (!active) {
+      dom.activeBookmarkText.textContent = '';
+      dom.activeBookmark.removeAttribute('title');
+      return;
+    }
+    const bookmark = getActiveBookmark();
+    const label = bookmark ? bookmark.name : state.query.join(', ');
+    dom.activeBookmarkText.textContent = bookmark ? `★ ${label}` : `поиск: ${label}`;
+    dom.activeBookmark.title = bookmark ? `слова: ${bookmark.keywords.join(', ')}` : label;
+    if (dom.activeBookmarkReset) {
+      dom.activeBookmarkReset.setAttribute('aria-label', 'Сбросить закладку');
+    }
+  }
+
+  /* 3–5 значимых слов из заголовка — для предзаполнения закладки. */
+  function keywordsFromTitle(title) {
+    const cleaned = String(title || '')
+      .toLowerCase()
+      .replace(/[«»„“”"'’`()[\]{}.,;:!?—–\-/\\|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const seen = new Set();
+    const words = [];
+    const push = (word) => {
+      if (!word || word.length < 3 || seen.has(word) || /^\d+$/.test(word)) return;
+      seen.add(word);
+      words.push(word);
+    };
+    cleaned.split(' ').forEach((word) => {
+      if (words.length >= 5) return;
+      if (BOOKMARK_STOP_WORDS.has(word)) return;
+      push(word);
+    });
+    if (words.length < 3) {
+      cleaned.split(' ').forEach((word) => {
+        if (words.length >= 3) return;
+        push(word);
+      });
+    }
+    return words.slice(0, 5);
+  }
+
+  function requestNotificationPermission() {
+    try {
+      if (typeof window.Notification !== 'function') return;
+      if (window.Notification.permission === 'default') {
+        const result = window.Notification.requestPermission();
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      }
+    } catch {
+      /* уведомления недоступны — не мешаем работе */
+    }
+  }
+
+  function maybeShowBookmarkNotification(bookmark, freshCount, data) {
+    try {
+      if (typeof window.Notification !== 'function') return;
+      if (window.Notification.permission !== 'granted') return;
+      if (!document.hidden) return;
+      const now = Date.now();
+      if (now - state.lastNotificationAt < BOOKMARK_NOTIFICATION_MIN_INTERVAL_MS) return;
+      const first = data && Array.isArray(data.passed) && data.passed[0] ? data.passed[0] : null;
+      const body = first && first.title
+        ? first.title
+        : `${freshCount} новых совпадений по закладке «${bookmark.name}»`;
+      const notification = new window.Notification(BOOKMARK_NOTIFICATION_TITLE, {
+        body,
+        tag: 'oboz-bookmark',
+      });
+      state.lastNotificationAt = now;
+      try {
+        window.__obozLastNotification = { title: BOOKMARK_NOTIFICATION_TITLE, body, at: now };
+      } catch {
+        /* отладочный след не критичен */
+      }
+      notification.onclick = function () {
+        try {
+          window.focus();
+        } catch {
+          /* ignore */
+        }
+      };
+    } catch {
+      /* Notification может быть запрещён политикой браузера */
+    }
+  }
+
+  function handleActiveBookmarkDigest(data) {
+    const bookmark = getActiveBookmark();
+    if (!bookmark || !state.query.length) return;
+    const ids = state.events.map((event) => String(event.id || '')).filter(Boolean);
+    if (!ids.length) return;
+    const seen = new Set(bookmark.seenIds.map(String));
+    const fresh = ids.filter((id) => !seen.has(id));
+    if (!fresh.length) return;
+    const updated = Object.assign({}, bookmark, {
+      seenIds: bookmark.seenIds.concat(fresh).slice(-MAX_SEEN_IDS),
+    });
+    replaceBookmark(updated);
+    state.bookmarkBadgeCount += fresh.length;
+    updateBookmarkBadge();
+    maybeShowBookmarkNotification(updated, fresh.length, data);
+  }
+
+  function showBookmarkError(message) {
+    if (!dom.bookmarkError) return;
+    dom.bookmarkError.textContent = message;
+    dom.bookmarkError.hidden = false;
+  }
+
+  function clearBookmarkError() {
+    if (!dom.bookmarkError) return;
+    dom.bookmarkError.textContent = '';
+    dom.bookmarkError.hidden = true;
+  }
+
+  function resetBookmarkForm() {
+    state.bookmarkEditingId = null;
+    state.bookmarkDraftEventId = null;
+    if (dom.bookmarkName) dom.bookmarkName.value = '';
+    if (dom.bookmarkKeywords) dom.bookmarkKeywords.value = '';
+    populateFilterSelect(dom.bookmarkCategory, state.categoryOptions, ALL_FILTER);
+    populateFilterSelect(dom.bookmarkCity, state.cityOptions, ALL_FILTER);
+    if (dom.bookmarkFormTitle) dom.bookmarkFormTitle.textContent = 'Новая закладка';
+    if (dom.bookmarkSubmit) dom.bookmarkSubmit.textContent = 'Сохранить';
+    if (dom.bookmarkHint) dom.bookmarkHint.textContent = '1–6 слов через запятую; покажем события, где встречается любое из них.';
+    clearBookmarkError();
+  }
+
+  function fillBookmarkForm(data) {
+    const values = data || {};
+    const keywords = normalizeQueryWords(values.keywords || []);
+    const category = hasFilterOption(state.categoryOptions, values.category) ? values.category : ALL_FILTER;
+    const city = hasFilterOption(state.cityOptions, values.city) ? values.city : ALL_FILTER;
+    state.bookmarkEditingId = values.editingId || null;
+    state.bookmarkDraftEventId = values.eventId || null;
+    if (dom.bookmarkName) dom.bookmarkName.value = truncate(String(values.name || ''), MAX_BOOKMARK_NAME);
+    if (dom.bookmarkKeywords) dom.bookmarkKeywords.value = keywords.join(', ');
+    populateFilterSelect(dom.bookmarkCategory, state.categoryOptions, category);
+    populateFilterSelect(dom.bookmarkCity, state.cityOptions, city);
+    if (dom.bookmarkFormTitle) {
+      dom.bookmarkFormTitle.textContent = state.bookmarkEditingId ? 'Редактировать закладку' : 'Новая закладка';
+    }
+    if (dom.bookmarkSubmit) dom.bookmarkSubmit.textContent = state.bookmarkEditingId ? 'Сохранить изменения' : 'Сохранить';
+    clearBookmarkError();
+  }
+
+  function renderBookmarksList() {
+    if (!dom.bookmarksList) return;
+    clearNode(dom.bookmarksList);
+    const bookmarks = state.bookmarks.slice().sort((left, right) => right.createdAt - left.createdAt);
+    if (dom.bookmarksEmpty) dom.bookmarksEmpty.hidden = bookmarks.length > 0;
+    bookmarks.forEach((bookmark) => {
+      const item = el('div', `bookmark-item${bookmark.id === state.activeBookmarkId ? ' is-active' : ''}`);
+      item.dataset.bookmarkId = bookmark.id;
+      item.dataset.testid = 'bookmark-item';
+
+      const main = el('div', 'bookmark-item-main');
+      main.append(el('div', 'bookmark-item-title', bookmark.name));
+      const meta = el(
+        'div',
+        'bookmark-item-meta',
+        `${bookmark.keywords.join(', ')} · ${optionLabel(state.categoryOptions, bookmark.category)} · ${optionLabel(state.cityOptions, bookmark.city)}`,
+      );
+      main.append(meta);
+      item.append(main);
+
+      const actions = el('div', 'bookmark-item-actions');
+      const open = el('button', 'bookmark-action', 'Открыть');
+      open.type = 'button';
+      open.dataset.action = 'open';
+      open.dataset.bookmarkId = bookmark.id;
+      open.dataset.testid = 'bookmark-open';
+      open.setAttribute('aria-label', `Открыть закладку «${bookmark.name}»`);
+      const remove = el('button', 'bookmark-action bookmark-action-danger', 'Удалить');
+      remove.type = 'button';
+      remove.dataset.action = 'delete';
+      remove.dataset.bookmarkId = bookmark.id;
+      remove.dataset.testid = 'bookmark-delete';
+      remove.setAttribute('aria-label', `Удалить закладку «${bookmark.name}»`);
+      actions.append(open, remove);
+      item.append(actions);
+      dom.bookmarksList.append(item);
+    });
+  }
+
+  function openBookmarksDialog(options) {
+    const opts = Object.assign({ prefill: null, source: 'header' }, options || {});
+    if (!dom.bookmarksDialog) return;
+    state.bookmarksSource = opts.source;
+    resetBookmarksBadge();
+    renderBookmarksList();
+    if (opts.prefill) fillBookmarkForm(opts.prefill);
+    else resetBookmarkForm();
+    if (!dom.bookmarksDialog.open) {
+      state.bookmarksReturnFocus = document.activeElement;
+      try {
+        dom.bookmarksDialog.showModal();
+      } catch {
+        dom.bookmarksDialog.setAttribute('open', '');
+      }
+    }
+    if (dom.bookmarksClose) dom.bookmarksClose.focus();
+  }
+
+  function closeBookmarksDialog() {
+    if (!dom.bookmarksDialog) return;
+    if (dom.bookmarksDialog.open) dom.bookmarksDialog.close();
+    else dom.bookmarksDialog.removeAttribute('open');
+  }
+
+  function applyBookmark(id) {
+    const bookmark = state.bookmarks.find((item) => item.id === id);
+    if (!bookmark) return;
+    state.query = bookmark.keywords.slice();
+    state.category = hasFilterOption(state.categoryOptions, bookmark.category) ? bookmark.category : ALL_FILTER;
+    state.city = hasFilterOption(state.cityOptions, bookmark.city) ? bookmark.city : ALL_FILTER;
+    if (state.city !== ALL_FILTER) state.region = 'ru';
+    state.activeBookmarkId = bookmark.id;
+    persistActiveBookmarkId(bookmark.id);
+    state.selectedIndex = 0;
+    requestNotificationPermission();
+    closeBookmarksDialog();
+    if (state.view === 'detail') leaveDetailToList();
+    syncControls();
+    syncUrl();
+    updateActiveBookmarkChip();
+    hideListError();
+    setStatus(`закладка «${bookmark.name}» — загружаю сводку…`);
+    loadDigest({ reason: 'bookmark' });
+  }
+
+  function resetBookmarkFilter() {
+    const wasActive = Boolean(state.activeBookmarkId) || state.query.length > 0;
+    state.query = [];
+    state.activeBookmarkId = null;
+    persistActiveBookmarkId(null);
+    state.category = ALL_FILTER;
+    state.city = ALL_FILTER;
+    state.selectedIndex = 0;
+    if (state.view === 'detail') leaveDetailToList();
+    syncControls();
+    syncUrl();
+    updateActiveBookmarkChip();
+    if (wasActive) {
+      hideListError();
+      setStatus('закладка сброшена');
+      loadDigest({ reason: 'bookmark-reset' });
+    }
+  }
+
+  function deleteBookmark(id) {
+    const bookmark = state.bookmarks.find((item) => item.id === id);
+    if (!bookmark) return;
+    const wasActive = state.activeBookmarkId === id;
+    state.bookmarks = state.bookmarks.filter((item) => item.id !== id);
+    saveBookmarks();
+    if (state.bookmarkEditingId === id) resetBookmarkForm();
+    if (wasActive) {
+      state.activeBookmarkId = null;
+      persistActiveBookmarkId(null);
+    }
+    renderBookmarksList();
+    updateActiveBookmarkChip();
+    if (state.detail) updateSaveBookmarkButton();
+    if (wasActive) {
+      state.query = [];
+      state.category = ALL_FILTER;
+      state.city = ALL_FILTER;
+      if (state.view === 'detail') leaveDetailToList();
+      syncControls();
+      syncUrl();
+      loadDigest({ reason: 'bookmark-deleted' });
+    }
+    setStatus(`закладка «${bookmark.name}» удалена`);
+  }
+
+  function saveBookmarkForm() {
+    if (!dom.bookmarkKeywords) return false;
+    const rawKeywords = String(dom.bookmarkKeywords.value || '')
+      .split(',')
+      .map((word) => word.trim())
+      .filter(Boolean);
+    if (!rawKeywords.length) {
+      showBookmarkError('Добавьте хотя бы одно ключевое слово.');
+      dom.bookmarkKeywords.focus();
+      return false;
+    }
+    if (rawKeywords.length > MAX_BOOKMARK_KEYWORDS) {
+      showBookmarkError('Можно сохранить не больше 6 слов.');
+      dom.bookmarkKeywords.focus();
+      return false;
+    }
+    const keywords = normalizeQueryWords(rawKeywords);
+    if (!keywords.length) {
+      showBookmarkError('Ключевые слова не распознаны.');
+      return false;
+    }
+    const name = dom.bookmarkName && dom.bookmarkName.value.trim()
+      ? truncate(dom.bookmarkName.value.trim(), MAX_BOOKMARK_NAME)
+      : keywords.join(', ');
+    const category = hasFilterOption(state.categoryOptions, dom.bookmarkCategory && dom.bookmarkCategory.value)
+      ? dom.bookmarkCategory.value
+      : ALL_FILTER;
+    const city = hasFilterOption(state.cityOptions, dom.bookmarkCity && dom.bookmarkCity.value)
+      ? dom.bookmarkCity.value
+      : ALL_FILTER;
+    const eventId = state.bookmarkDraftEventId || null;
+
+    if (state.bookmarkEditingId) {
+      const existing = state.bookmarks.find((item) => item.id === state.bookmarkEditingId);
+      if (existing) {
+        replaceBookmark(Object.assign({}, existing, {
+          name,
+          keywords,
+          category,
+          city,
+          eventId: existing.eventId || eventId,
+        }));
+      }
+    } else {
+      state.bookmarks.push({
+        id: generateBookmarkId(),
+        name,
+        keywords,
+        category,
+        city,
+        createdAt: Date.now(),
+        seenIds: [],
+        eventId,
+      });
+      saveBookmarks();
+    }
+
+    requestNotificationPermission();
+    state.bookmarkEditingId = null;
+    state.bookmarkDraftEventId = null;
+    renderBookmarksList();
+    updateActiveBookmarkChip();
+    if (state.detail) updateSaveBookmarkButton();
+    setStatus(`закладка «${name}» сохранена`);
+    resetBookmarkForm();
+    return true;
+  }
+
+  function saveCurrentEventBookmark() {
+    const event = state.detail;
+    if (!event || !event.id) return;
+    requestNotificationPermission();
+    const existing = findBookmarkForEvent(event);
+    const title = event.title || 'Без заголовка';
+    const keywords = existing ? existing.keywords.slice() : keywordsFromTitle(title);
+    const category = existing
+      ? existing.category
+      : (Array.isArray(event.topics) && event.topics.length ? event.topics[0] : ALL_FILTER);
+    const city = existing
+      ? existing.city
+      : (Array.isArray(event.cities) && event.cities.length ? event.cities[0] : ALL_FILTER);
+    openBookmarksDialog({
+      source: 'event',
+      prefill: {
+        name: existing ? existing.name : truncate(title, MAX_BOOKMARK_NAME),
+        keywords,
+        category,
+        city,
+        editingId: existing ? existing.id : null,
+        eventId: String(event.id),
+      },
+    });
+  }
+
+  function updateSaveBookmarkButton() {
+    if (!dom.saveBookmark) return;
+    const event = state.detail;
+    if (!event || state.view !== 'detail') {
+      dom.saveBookmark.hidden = true;
+      return;
+    }
+    const saved = findBookmarkForEvent(event);
+    dom.saveBookmark.hidden = false;
+    dom.saveBookmark.textContent = saved ? '★ в закладках' : '☆ в закладки';
+    dom.saveBookmark.setAttribute('aria-pressed', saved ? 'true' : 'false');
+    dom.saveBookmark.setAttribute('aria-label', saved ? 'Новость уже в закладках' : 'Сохранить новость в закладки');
   }
 
   function formatNumberValue(value, unit) {
@@ -375,11 +814,129 @@
     return /^[a-z0-9-]{1,32}$/.test(id) ? id : fallback;
   }
 
+  // ---------------------------------------------------------------------------
+  // Закладки: localStorage oboz-bookmarks-v1
+  // ---------------------------------------------------------------------------
+
+  function normalizeQueryWords(value) {
+    const rawList = Array.isArray(value) ? value : String(value || '').split(',');
+    const words = [];
+    const seen = new Set();
+    for (const raw of rawList) {
+      const word = String(raw || '').trim();
+      if (!word) continue;
+      const key = word.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      words.push(word);
+      if (words.length >= MAX_BOOKMARK_KEYWORDS) break;
+    }
+    return words;
+  }
+
+  function queryKey(words) {
+    return normalizeQueryWords(words)
+      .map((word) => word.toLowerCase())
+      .sort()
+      .join('|');
+  }
+
+  function sameQuery(left, right) {
+    return queryKey(left) === queryKey(right);
+  }
+
+  function readStoredActiveBookmarkId() {
+    try {
+      const value = window.localStorage.getItem(ACTIVE_BOOKMARK_KEY);
+      return typeof value === 'string' && value ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function persistActiveBookmarkId(id) {
+    try {
+      if (id) window.localStorage.setItem(ACTIVE_BOOKMARK_KEY, id);
+      else window.localStorage.removeItem(ACTIVE_BOOKMARK_KEY);
+    } catch {
+      /* приватный режим — закладки живут до перезагрузки */
+    }
+  }
+
+  function generateBookmarkId() {
+    return `bm_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function normalizeBookmark(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const keywords = normalizeQueryWords(raw.keywords);
+    if (!keywords.length) return null;
+    const name = typeof raw.name === 'string' && raw.name.trim()
+      ? truncate(raw.name.trim(), MAX_BOOKMARK_NAME)
+      : keywords.join(', ');
+    const category = typeof raw.category === 'string' && raw.category
+      ? readFilterId(raw.category, ALL_FILTER)
+      : ALL_FILTER;
+    const city = typeof raw.city === 'string' && raw.city ? readFilterId(raw.city, ALL_FILTER) : ALL_FILTER;
+    const createdAt = Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now();
+    const seenIds = Array.isArray(raw.seenIds)
+      ? raw.seenIds.filter((id) => typeof id === 'string' && id).slice(-MAX_SEEN_IDS)
+      : [];
+    return {
+      id: typeof raw.id === 'string' && raw.id ? raw.id : generateBookmarkId(),
+      name,
+      keywords,
+      category,
+      city,
+      createdAt,
+      seenIds,
+      eventId: typeof raw.eventId === 'string' && raw.eventId ? raw.eventId : null,
+    };
+  }
+
+  function readBookmarks() {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem(BOOKMARKS_KEY) || '[]');
+      if (!Array.isArray(raw)) return [];
+      return raw.map(normalizeBookmark).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBookmarks() {
+    try {
+      window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(state.bookmarks));
+    } catch {
+      /* без localStorage закладки работают до перезагрузки */
+    }
+  }
+
+  function replaceBookmark(bookmark) {
+    state.bookmarks = state.bookmarks.map((item) => (item.id === bookmark.id ? bookmark : item));
+    saveBookmarks();
+  }
+
+  function getActiveBookmark() {
+    return state.bookmarks.find((bookmark) => bookmark.id === state.activeBookmarkId) || null;
+  }
+
+  function findBookmarkForQuery(words) {
+    const key = queryKey(words);
+    return state.bookmarks.find((bookmark) => queryKey(bookmark.keywords) === key) || null;
+  }
+
+  function findBookmarkForEvent(event) {
+    if (!event || !event.id) return null;
+    return state.bookmarks.find((bookmark) => bookmark.eventId === String(event.id)) || null;
+  }
+
   function readUrlState() {
     let region = DEFAULT_REGION;
     let threshold = DEFAULT_THRESHOLD;
     let category = ALL_FILTER;
     let city = ALL_FILTER;
+    let query = [];
     let eventId = null;
     try {
       const params = new URLSearchParams(window.location.search);
@@ -388,12 +945,13 @@
       if (params.has('threshold')) threshold = normalizeThreshold(params.get('threshold'));
       category = readFilterId(params.get('category'), ALL_FILTER);
       city = readFilterId(params.get('city'), ALL_FILTER);
+      query = normalizeQueryWords(params.get('q'));
       if (city !== ALL_FILTER) region = 'ru';
       eventId = readEventIdFromHash(window.location.hash);
     } catch {
       /* некорректный URL — дефолты */
     }
-    return { region, threshold, category, city, eventId };
+    return { region, threshold, category, city, query, eventId };
   }
 
   function buildUrl(hash) {
@@ -402,6 +960,7 @@
     params.set('threshold', state.threshold.toFixed(2));
     params.set('category', state.category);
     params.set('city', state.city);
+    if (state.query.length) params.set('q', state.query.join(','));
     return `${window.location.pathname}?${params.toString()}${hash || ''}`;
   }
 
@@ -472,6 +1031,7 @@
     const requestedThreshold = state.threshold;
     const requestedCategory = state.category;
     const requestedCity = state.city;
+    const requestedQuery = state.query.slice();
 
     state.loading = true;
     dom.refreshButton.disabled = true;
@@ -494,12 +1054,13 @@
     params.set('limit', String(EVENTS_LIMIT));
     params.set('category', requestedCategory);
     params.set('city', requestedCity);
+    if (requestedQuery.length) params.set('q', requestedQuery.join(','));
     if (opts.refresh) params.set('refresh', '1');
 
     return fetchJson(`api/digest?${params.toString()}`, controller.signal)
       .then((data) => {
         if (token !== state.digestToken) return;
-        applyDigest(data, { requestedRegion, requestedThreshold, requestedCategory, requestedCity });
+        applyDigest(data, { requestedRegion, requestedThreshold, requestedCategory, requestedCity, requestedQuery });
         hideListError();
       })
       .catch((error) => {
@@ -561,6 +1122,13 @@
     }
     if (state.city !== ALL_FILTER) state.region = 'ru';
 
+    const serverQuery = normalizeQueryWords(data.query);
+    if (requested.requestedQuery.length && sameQuery(serverQuery, requested.requestedQuery)) {
+      state.query = serverQuery;
+    } else if (!requested.requestedQuery.length) {
+      state.query = [];
+    }
+
     if (state.selectedIndex >= state.events.length) {
       state.selectedIndex = Math.max(0, state.events.length - 1);
     }
@@ -572,6 +1140,9 @@
     syncControls();
     syncUrl();
     updateHeader();
+    updateActiveBookmarkChip();
+    handleActiveBookmarkDigest(data);
+    if (state.view === 'detail' && state.detail) updateSaveBookmarkButton();
 
     if (state.view === 'list') {
       renderList();
@@ -628,7 +1199,7 @@
     } else {
       appendStat(dom.digestStats, 'источников', sourcesText);
     }
-    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER;
+    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER || state.query.length > 0;
     const matchedEvents = Number(stats.events);
     const allEventsCount = Number(stats.allEvents);
     const eventsValue = filtersActive && Number.isFinite(matchedEvents) && Number.isFinite(allEventsCount)
@@ -905,7 +1476,8 @@
     const articles = Number.isFinite(Number(stats.articlesUsed)) ? Number(stats.articlesUsed) : null;
     const events = Number.isFinite(Number(stats.events)) ? Number(stats.events) : null;
 
-    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER;
+    const filtersActive = state.category !== ALL_FILTER || state.city !== ALL_FILTER || state.query.length > 0;
+    const bookmarkActive = state.query.length > 0;
     const allEvents = Number.isFinite(Number(stats.allEvents)) ? Number(stats.allEvents) : null;
     const matchedEvents = events !== null ? events : 0;
 
@@ -933,7 +1505,14 @@
         ? `Проверено ${parts.join(', ')}; по фильтрам совпало ${pluralizeNumber(matchedEvents)}. `
         : `По фильтрам совпало ${pluralizeNumber(matchedEvents)}. `;
     }
-    if (filtersActive) {
+    if (bookmarkActive) {
+      const bookmark = getActiveBookmark();
+      const label = bookmark ? bookmark.name : state.query.join(', ');
+      const bookmarkPhrase = bookmark ? `По закладке «${label}»` : `По поиску «${label}»`;
+      dom.emptyDetail.textContent =
+        `${checked}${bookmarkPhrase} ничего не произошло выше порога ${state.threshold.toFixed(2)}. ` +
+        'Сбросьте закладку или снизьте порог — но тогда в список попадёт менее подтверждённое.';
+    } else if (filtersActive) {
       const filterParts = [];
       if (state.category !== ALL_FILTER) {
         filterParts.push(`теме «${optionLabel(state.categoryOptions, state.category)}»`);
@@ -1620,6 +2199,8 @@
       `досье открыто · ${countSources(event)} ${plural(countSources(event), 'источник', 'источника', 'источников')} · достоверность ${formatScore(event.confidence)}`,
     );
 
+    updateSaveBookmarkButton();
+
     const title = dom.detailContent.querySelector('.detail-title');
     if (title && typeof title.focus === 'function') {
       title.focus({ preventScroll: true });
@@ -1635,6 +2216,7 @@
     if (state.view === 'detail') leaveDetailToList();
     syncControls();
     syncUrl();
+    updateActiveBookmarkChip();
     hideListError();
     setStatus('применяю фильтры — загружаю сводку…');
     loadDigest({ reason: 'filters' });
@@ -1654,9 +2236,13 @@
   }
 
   function resetFilters() {
-    if (state.category === ALL_FILTER && state.city === ALL_FILTER) return;
+    const hasFilters = state.category !== ALL_FILTER || state.city !== ALL_FILTER || state.query.length > 0;
+    if (!hasFilters) return;
     state.category = ALL_FILTER;
     state.city = ALL_FILTER;
+    state.query = [];
+    state.activeBookmarkId = null;
+    persistActiveBookmarkId(null);
     applyFilterChange();
   }
 
@@ -1818,6 +2404,14 @@
   function onKeyDown(event) {
     if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
 
+    if (dom.bookmarksDialog && dom.bookmarksDialog.open) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeBookmarksDialog();
+      }
+      return;
+    }
+
     if (dom.helpDialog && dom.helpDialog.open) {
       if (event.key === 'Escape' || event.key === '?') {
         event.preventDefault();
@@ -1932,6 +2526,52 @@
       });
     }
 
+    if (dom.bookmarksButton) {
+      dom.bookmarksButton.addEventListener('click', () => {
+        openBookmarksDialog({ source: 'header' });
+      });
+    }
+    if (dom.bookmarksClose) {
+      dom.bookmarksClose.addEventListener('click', () => closeBookmarksDialog());
+    }
+    if (dom.bookmarksDialog) {
+      dom.bookmarksDialog.addEventListener('click', (event) => {
+        if (event.target === dom.bookmarksDialog) closeBookmarksDialog();
+      });
+      dom.bookmarksDialog.addEventListener('close', () => {
+        const target = state.bookmarksReturnFocus;
+        state.bookmarksReturnFocus = null;
+        if (target && typeof target.focus === 'function') target.focus();
+      });
+    }
+    if (dom.bookmarkCancel) {
+      dom.bookmarkCancel.addEventListener('click', () => closeBookmarksDialog());
+    }
+    if (dom.bookmarkForm) {
+      dom.bookmarkForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const fromEvent = state.bookmarksSource === 'event';
+        if (!saveBookmarkForm()) return;
+        if (fromEvent) closeBookmarksDialog();
+      });
+    }
+    if (dom.bookmarksList) {
+      dom.bookmarksList.addEventListener('click', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('[data-action]') : null;
+        if (!button) return;
+        const id = button.dataset.bookmarkId;
+        if (!id) return;
+        if (button.dataset.action === 'open') applyBookmark(id);
+        else if (button.dataset.action === 'delete') deleteBookmark(id);
+      });
+    }
+    if (dom.activeBookmarkReset) {
+      dom.activeBookmarkReset.addEventListener('click', () => resetBookmarkFilter());
+    }
+    if (dom.saveBookmark) {
+      dom.saveBookmark.addEventListener('click', () => saveCurrentEventBookmark());
+    }
+
     dom.errorRetry.addEventListener('click', () => {
       hideListError();
       loadDigest(Object.assign({}, state.lastDigestOpts, { silent: false }));
@@ -1987,6 +2627,27 @@
     dom.categorySelect = document.getElementById('category-select');
     dom.citySelect = document.getElementById('city-select');
     dom.resetFilters = document.getElementById('reset-filters');
+    dom.bookmarksButton = document.getElementById('bookmarks-button');
+    dom.bookmarksBadge = document.getElementById('bookmarks-badge');
+    dom.activeBookmarkRow = document.getElementById('active-bookmark-row');
+    dom.activeBookmark = document.getElementById('active-bookmark');
+    dom.activeBookmarkText = document.getElementById('active-bookmark-text');
+    dom.activeBookmarkReset = document.getElementById('active-bookmark-reset');
+    dom.saveBookmark = document.getElementById('save-bookmark');
+    dom.bookmarksDialog = document.getElementById('bookmarks-dialog');
+    dom.bookmarksClose = document.getElementById('bookmarks-close');
+    dom.bookmarksList = document.getElementById('bookmarks-list');
+    dom.bookmarksEmpty = document.getElementById('bookmarks-empty');
+    dom.bookmarkForm = document.getElementById('bookmark-form');
+    dom.bookmarkFormTitle = document.getElementById('bookmark-form-title');
+    dom.bookmarkName = document.getElementById('bookmark-name');
+    dom.bookmarkKeywords = document.getElementById('bookmark-keywords');
+    dom.bookmarkCategory = document.getElementById('bookmark-category');
+    dom.bookmarkCity = document.getElementById('bookmark-city');
+    dom.bookmarkHint = document.getElementById('bookmark-hint');
+    dom.bookmarkError = document.getElementById('bookmark-error');
+    dom.bookmarkSubmit = document.getElementById('bookmark-submit');
+    dom.bookmarkCancel = document.getElementById('bookmark-cancel');
     dom.thresholdRange = document.getElementById('threshold-range');
     dom.thresholdValue = document.getElementById('threshold-value');
     dom.refreshButton = document.getElementById('refresh-button');
@@ -2047,11 +2708,32 @@
     state.threshold = initial.threshold;
     state.category = initial.category;
     state.city = initial.city;
+    state.query = initial.query;
     if (state.city !== ALL_FILTER) state.region = 'ru';
+
+    state.bookmarks = readBookmarks();
+    state.activeBookmarkId = null;
+    if (state.query.length) {
+      const storedId = readStoredActiveBookmarkId();
+      let match = storedId
+        ? state.bookmarks.find((bookmark) => bookmark.id === storedId && sameQuery(bookmark.keywords, state.query))
+        : null;
+      if (!match) match = findBookmarkForQuery(state.query);
+      if (match) {
+        state.activeBookmarkId = match.id;
+        persistActiveBookmarkId(match.id);
+      } else {
+        persistActiveBookmarkId(null);
+      }
+    } else {
+      persistActiveBookmarkId(null);
+    }
 
     rebuildFilterSelects();
     syncControls();
     bindEvents();
+    updateActiveBookmarkChip();
+    updateBookmarkBadge();
 
     const initialHash = initial.eventId ? `#/event/${encodeURIComponent(initial.eventId)}` : '';
     try {

@@ -101,7 +101,7 @@ test('CLI: news --demo --json — валидный JSON со stats/passed/reject
     const payload = JSON.parse(result.stdout);
     assert.deepEqual(
       Object.keys(payload),
-      ['generatedAt', 'region', 'threshold', 'category', 'city', 'filters', 'empty', 'stats', 'passed', 'rejected'],
+      ['generatedAt', 'region', 'threshold', 'category', 'city', 'query', 'filters', 'empty', 'stats', 'passed', 'rejected'],
     );
     assert.equal(payload.region, 'ru');
     assert.equal(payload.threshold, 0.55);
@@ -366,6 +366,30 @@ test('CLI: --category и --city фильтруют события, неизве�
     const badCity = runCli(['news', '--demo', '--city', 'ufa'], { workspace: ws });
     assert.equal(badCity.status, 2);
     assert.match(badCity.stderr, /Неизвестный город/);
+  } finally {
+    ws.cleanup();
+  }
+});
+
+
+test('CLI: --query фильтрует по ключевым словам', () => {
+  const ws = makeWorkspace();
+  try {
+    const result = runCli(['news', '--demo', '--json', '--query', 'Курск'], { workspace: ws });
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(payload.query, ['курск']);
+    assert.equal(payload.stats.passed, 1);
+    assert.equal(payload.passed.length, 1);
+    assert.match(payload.passed[0].title, /Курск/i);
+
+    const empty = runCli(['news', '--demo', '--json', '--query', 'музыка'], { workspace: ws });
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.equal(JSON.parse(empty.stdout).empty, true);
+
+    const bad = runCli(['news', '--demo', '--query'], { workspace: ws });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /--query/);
   } finally {
     ws.cleanup();
   }

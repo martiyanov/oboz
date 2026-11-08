@@ -17,7 +17,7 @@ class UserError extends Error {
   }
 }
 
-const VALUE_FLAGS = new Set(['region', 'threshold', 'limit', 'every', 'cache-dir', 'width', 'category', 'city']);
+const VALUE_FLAGS = new Set(['region', 'threshold', 'limit', 'every', 'cache-dir', 'width', 'category', 'city', 'query', 'keywords']);
 const REGIONS = ['ru', 'world', 'all'];
 
 function parseArgs(argv) {
@@ -119,6 +119,7 @@ const HELP = `ОБОЗРЕВАТЕЛЬ — терминальный сторож
   --category all|tech|music|… тема: politics, economy, society, tech, music,
                               culture, science, sport, incidents (или all)
   --city all|moscow|nizhny    город: Москва или Нижний Новгород
+  --query "слово, слово"      фильтр по ключевым словам (закладки)
   --threshold 0.55            порог значимости 0..1
   --limit 12                  сколько событий показать
   --json                      машинный вывод (news)
@@ -134,6 +135,7 @@ const HELP = `ОБОЗРЕВАТЕЛЬ — терминальный сторож
 ПРИМЕРЫ
   oboz news --region ru --threshold 0.6
   oboz news --category tech
+  oboz news --query "Курск, БПЛА"
   oboz news --city moscow --threshold 0.5
   oboz news --region world --explain
   oboz watch --every 1h --quiet
@@ -148,6 +150,9 @@ async function cmdNews(flags) {
   const limit = parseLimit(flags.limit, config.limit);
   const category = await parseCategory(flags.category);
   const city = await parseCity(flags.city);
+  const rawQuery = flags.query !== undefined ? flags.query : flags.keywords;
+  if (rawQuery === true || rawQuery === '') throw new UserError('--query требует ключевые слова через запятую, например --query "Курск, БПЛА"');
+  const query = typeof rawQuery === 'string' ? rawQuery.slice(0, 300) : undefined;
   const spinner = !flags.json && process.stderr.isTTY;
   if (spinner) process.stderr.write('Загружаю ленты…\r');
   const digest = await buildDigest({
@@ -159,6 +164,7 @@ async function cmdNews(flags) {
     wiki: Boolean(flags.wiki),
     category,
     city,
+    query,
   });
   if (spinner) process.stderr.write('\r\x1b[K');
 
@@ -174,6 +180,7 @@ async function cmdNews(flags) {
       threshold: digest.threshold,
       category: digest.category,
       city: digest.city,
+      query: digest.query,
       filters: digest.filters,
       empty: digest.empty,
       stats: digest.stats,

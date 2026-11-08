@@ -10,6 +10,8 @@ import { buildDigest, enrichEvent } from '../src/digest.js';
 import { loadConfig, loadSources } from '../src/config.js';
 import { publicEvent } from '../src/format.js';
 import { ROOT, STATE_DIR } from '../src/paths.js';
+import { hashId } from '../src/util.js';
+import { parseQuery } from '../src/query.js';
 import { loadTopics, categoryList, cityList } from '../src/topics.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,8 +75,8 @@ function parseRegion(value, fallback) {
   return REGIONS.includes(value) ? value : fallback;
 }
 
-function cacheKey(region, threshold, limit, category = 'all', city = 'all') {
-  return `${region}|${threshold.toFixed(2)}|${limit}|${category}|${city}`;
+function cacheKey(region, threshold, limit, category = 'all', city = 'all', query = '') {
+  return `${region}|${threshold.toFixed(2)}|${limit}|${category}|${city}|${hashId(query)}`;
 }
 
 function parseCategory(value, catalog) {
@@ -98,6 +100,7 @@ function digestPayload(digest) {
   return {
     category: digest.category || 'all',
     city: digest.city || 'all',
+    query: Array.isArray(digest.query) ? digest.query : [],
     generatedAt: digest.generatedAt,
     region: digest.region,
     threshold: digest.threshold,
@@ -122,8 +125,8 @@ function digestPayload(digest) {
   };
 }
 
-async function buildAndCache(region, threshold, limit, refresh = false, category = 'all', city = 'all') {
-  const key = cacheKey(region, threshold, limit, category, city);
+async function buildAndCache(region, threshold, limit, refresh = false, category = 'all', city = 'all', query = '') {
+  const key = cacheKey(region, threshold, limit, category, city, query);
   const cached = digestCache.get(key);
   if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
@@ -131,7 +134,7 @@ async function buildAndCache(region, threshold, limit, refresh = false, category
 
   const promise = (async () => {
     const t0 = Date.now();
-    const digest = await buildDigest({ region, threshold, limit, wiki: false, demo: DEMO, category, city });
+    const digest = await buildDigest({ region, threshold, limit, wiki: false, demo: DEMO, category, city, query });
     const payload = digestPayload(digest);
     stats.builds += 1;
     stats.buildMs = Date.now() - t0;
@@ -145,24 +148,24 @@ async function buildAndCache(region, threshold, limit, refresh = false, category
   return promise;
 }
 
-function serveStaleThenRebuild(region, threshold, limit, category, city) {
-  const key = cacheKey(region, threshold, limit, category, city);
+function serveStaleThenRebuild(region, threshold, limit, category, city, query) {
+  const key = cacheKey(region, threshold, limit, category, city, query);
   const cached = digestCache.get(key);
   if (cached) {
     // Отдаём устаревший кэш мгновенно, обновление — в фоне.
-    buildAndCache(region, threshold, limit, true, category, city).catch((error) => log('background rebuild failed:', error.message));
+    buildAndCache(region, threshold, limit, true, category, city, query).catch((error) => log('background rebuild failed:', error.message));
     return cached.value;
   }
-  return buildAndCache(region, threshold, limit, false, category, city);
+  return buildAndCache(region, threshold, limit, false, category, city, query);
 }
 
-async function getDigest(region, threshold, limit, refresh, category = 'all', city = 'all') {
-  const key = cacheKey(region, threshold, limit, category, city);
+async function getDigest(region, threshold, limit, refresh, category = 'all', city = 'all', query = '') {
+  const key = cacheKey(region, threshold, limit, category, city, query);
   const cached = digestCache.get(key);
-  if (refresh) return buildAndCache(region, threshold, limit, true, category, city);
-  if (!cached) return buildAndCache(region, threshold, limit, false, category, city);
+  if (refresh) return buildAndCache(region, threshold, limit, true, category, city, query);
+  if (!cached) return buildAndCache(region, threshold, limit, false, category, city, query);
   if (Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
-  return serveStaleThenRebuild(region, threshold, limit, category, city);
+  return serveStaleThenRebuild(region, threshold, limit, category, city, query);
 }
 
 // Полный набор событий для досье любого id (включая те, что ниже порога).
@@ -431,7 +434,8 @@ async function handleApi(req, res, url) {
     const refresh = searchParams.get('refresh') === '1';
     const category = parseCategory(searchParams.get('category'), topicsCatalog);
     const city = parseCity(searchParams.get('city'), topicsCatalog);
-    const payload = await getDigest(region, threshold, limit, refresh, category, city);
+    const query = parseQuery(String(searchParams.get('q') || '').slice(0, 300)).join(',');
+    const payload = await getDigest(region, threshold, limit, refresh, category, city, query);
     sendJson(req, res, 200, payload);
     return true;
   }
@@ -606,13 +610,13 @@ async function main() {
     log(`oboz web listening on http://${HOST}:${PORT} (version ${packageVersion})`);
     if (NO_WARM) return;
     // Прогреваем кэш, чтобы первый посетитель не ждал загрузку лент.
-    getDigest('ru', config.threshold ?? 0.55, config.limit ?? 12, false, 'all', 'all')
+    getDigest('ru', config.threshold ?? 0.55, config.limit ?? 12, false, 'all', 'all', '')
       .catch((error) => log('warmup failed:', error.message));
   });
 
   if (!NO_WARM) {
     const warmTimer = setInterval(() => {
-      getDigest('ru', config.threshold ?? 0.55, config.limit ?? 12, false, 'all', 'all')
+      getDigest('ru', config.threshold ?? 0.55, config.limit ?? 12, false, 'all', 'all', '')
         .catch((error) => log('warmup failed:', error.message));
     }, 120_000);
     warmTimer.unref();

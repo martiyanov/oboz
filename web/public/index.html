@@ -33,6 +33,13 @@
           <button type="button" class="region-button" data-region="world" aria-pressed="false" title="Мир">Мир</button>
           <button type="button" class="region-button" data-region="all" aria-pressed="false" title="Всё">Всё</button>
         </div>
+        <button type="button" class="icon-button bookmarks-button" id="bookmarks-button" aria-label="Закладки" title="Закладки">
+          <svg class="bookmark-glyph" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1.1 5.9-5.3-2.9-5.3 2.9 1.1-5.9L3.5 9.7l5.9-.8Z"></path>
+          </svg>
+          <span class="button-label">Закладки</span>
+          <span class="bookmarks-badge" id="bookmarks-badge" data-testid="bookmarks-badge" hidden>0</span>
+        </button>
         <button type="button" class="icon-button refresh-button" id="refresh-button" aria-label="Обновить сводку" title="Обновить (r)">
           <span class="refresh-glyph" aria-hidden="true">↻</span>
           <span class="button-label">Обновить</span>
@@ -112,6 +119,13 @@
       </div>
     </div>
 
+    <div class="active-bookmark-row" id="active-bookmark-row" hidden>
+      <span class="active-bookmark" id="active-bookmark" data-testid="active-bookmark">
+        <span class="active-bookmark-text" id="active-bookmark-text"></span>
+        <button type="button" class="active-bookmark-reset" id="active-bookmark-reset" aria-label="Сбросить закладку" title="Сбросить закладку">×</button>
+      </span>
+    </div>
+
     <p class="stats-line" id="digest-stats" aria-live="polite">загрузка статистики…</p>
     <p class="status-line" id="status-line" role="status" aria-live="polite"></p>
   </header>
@@ -179,10 +193,13 @@
 
     <section class="view detail-view" id="detail-view" hidden aria-labelledby="detail-title">
       <div class="detail-toolbar">
-        <button type="button" class="back-button" id="detail-back" data-testid="detail-back">
-          <span class="back-arrow" aria-hidden="true">←</span>
-          <span>к списку</span>
-        </button>
+        <div class="detail-toolbar-left">
+          <button type="button" class="back-button" id="detail-back" data-testid="detail-back">
+            <span class="back-arrow" aria-hidden="true">←</span>
+            <span>к списку</span>
+          </button>
+          <button type="button" class="save-bookmark-button" id="save-bookmark" data-testid="save-bookmark" aria-label="Сохранить новость в закладки" hidden>☆ в закладки</button>
+        </div>
         <span class="detail-toolbar-meta" id="detail-toolbar-meta"></span>
       </div>
 
@@ -243,6 +260,47 @@
     </dl>
     <p class="help-note">Список обновляется сам раз в 60 секунд; в досье автообновление приостановлено.</p>
     <p class="help-note">Это терминальный фильтр, а не лента: показываются только события выше порога и с несколькими независимыми источниками.</p>
+  </dialog>
+
+  <dialog class="help-dialog bookmarks-dialog" id="bookmarks-dialog" aria-labelledby="bookmarks-title">
+    <div class="help-head">
+      <h2 class="help-title" id="bookmarks-title">МОИ ЗАКЛАДКИ</h2>
+      <button type="button" class="help-close" id="bookmarks-close" aria-label="Закрыть закладки">×</button>
+    </div>
+    <div class="bookmarks-body">
+      <div class="bookmarks-list" id="bookmarks-list" data-testid="bookmarks-list"></div>
+      <p class="empty-note bookmarks-empty" id="bookmarks-empty" hidden>Пока нет закладок</p>
+
+      <form class="bookmark-form" id="bookmark-form" novalidate>
+        <h3 class="bookmark-form-title" id="bookmark-form-title">Новая закладка</h3>
+        <div class="bookmark-fields">
+          <label class="bookmark-field">
+            <span class="bookmark-label">название</span>
+            <input class="bookmark-input" id="bookmark-name" name="bookmark-name" type="text" maxlength="80" autocomplete="off" placeholder="например, Курск">
+          </label>
+          <label class="bookmark-field">
+            <span class="bookmark-label">ключевые слова</span>
+            <input class="bookmark-input" id="bookmark-keywords" name="bookmark-keywords" type="text" maxlength="240" autocomplete="off" placeholder="курск, бпла" required aria-describedby="bookmark-hint">
+          </label>
+          <div class="bookmark-selects">
+            <label class="bookmark-field">
+              <span class="bookmark-label">тема</span>
+              <select class="bookmark-select" id="bookmark-category" aria-label="Тема закладки"></select>
+            </label>
+            <label class="bookmark-field">
+              <span class="bookmark-label">город</span>
+              <select class="bookmark-select" id="bookmark-city" aria-label="Город закладки"></select>
+            </label>
+          </div>
+        </div>
+        <p class="bookmark-hint" id="bookmark-hint">1–6 слов через запятую; покажем события, где встречается любое из них.</p>
+        <p class="bookmark-error" id="bookmark-error" role="alert" hidden></p>
+        <div class="bookmark-form-actions">
+          <button type="submit" class="lower-button" id="bookmark-submit">Сохранить</button>
+          <button type="button" class="lower-button bookmark-cancel" id="bookmark-cancel">Отмена</button>
+        </div>
+      </form>
+    </div>
   </dialog>
 
   <script src="app.js" defer></script>

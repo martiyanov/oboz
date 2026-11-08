@@ -10,6 +10,7 @@ import { round } from './util.js';
 import {
   loadTopics, classifyArticle, filterByCategoryCity, categoryList, cityList,
 } from './topics.js';
+import { parseQuery, filterByQuery } from './query.js';
 
 function cleanOverrides(overrides) {
   const out = {};
@@ -37,6 +38,7 @@ export async function buildDigest(options = {}) {
   const limit = options.limit ?? config.limit ?? 12;
   const category = options.category && options.category !== 'all' ? options.category : 'all';
   const city = options.city && options.city !== 'all' ? options.city : 'all';
+  const keywords = options.keywords || parseQuery(options.query);
   const catalog = await loadTopics();
 
   let articles = [];
@@ -106,7 +108,8 @@ export async function buildDigest(options = {}) {
   const scoped = evaluated.filter((event) => region === 'all' || event.scope.includes(region));
   scoped.sort((a, b) => b.score - a.score || (b.latestAt || 0) - (a.latestAt || 0));
 
-  const matching = filterByCategoryCity(scoped, { category, city });
+  const matchingFilters = filterByCategoryCity(scoped, { category, city });
+  const matching = filterByQuery(matchingFilters, keywords);
 
   const passed = matching.filter((event) => event.passed);
   const covered = passed.slice(0, limit);
@@ -146,7 +149,8 @@ export async function buildDigest(options = {}) {
     threshold: round(threshold, 3),
     category,
     city,
-    filters: { category: categoryInfo, city: cityInfo },
+    query: keywords,
+    filters: { category: categoryInfo, city: cityInfo, query: keywords },
     categories: categoryList(catalog),
     cities: cityList(catalog),
     config,
