@@ -1305,9 +1305,49 @@
     if (dom.toast) dom.toast.hidden = true;
   }
 
+  // Минималистичный смайлик: тонкий контур, без эмодзи и заливок.
+  function createSmileyIcon(voteType) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.4');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+
+    const face = document.createElementNS(NS, 'circle');
+    face.setAttribute('cx', '10');
+    face.setAttribute('cy', '10');
+    face.setAttribute('r', '7');
+    svg.append(face);
+
+    for (const eyeX of ['7.4', '12.6']) {
+      const eye = document.createElementNS(NS, 'circle');
+      eye.setAttribute('cx', eyeX);
+      eye.setAttribute('cy', '8.1');
+      eye.setAttribute('r', '0.55');
+      eye.setAttribute('fill', 'currentColor');
+      eye.setAttribute('stroke', 'none');
+      svg.append(eye);
+    }
+
+    const mouth = document.createElementNS(NS, 'path');
+    mouth.setAttribute('d', voteType === 'like'
+      ? 'M6.4 11.1 Q10 14.2 13.6 11.1'
+      : 'M6.4 13 Q10 10 13.6 13');
+    mouth.setAttribute('fill', 'none');
+    svg.append(mouth);
+    return svg;
+  }
+
   function createVoteButton(event, voteType) {
     const active = voteType === 'like' ? isEventLiked(event) : isEventDisliked(event);
-    const button = el('button', 'vote-button', voteType === 'like' ? '👍' : '👎');
+    const button = el('button', 'vote-button');
+    button.append(createSmileyIcon(voteType));
     button.type = 'button';
     button.dataset.vote = voteType;
     button.dataset.eventId = String(event.id || '');
