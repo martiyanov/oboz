@@ -129,6 +129,23 @@ likedTopics{id:count}, likedSources{id:count}, likedKeywords{word:count}, sortMo
 Токен — bearer-секрет: по нему открывается профиль, в URL его не передаём (только заголовок/тело).
 Сервер санитизирует поля и не отдаёт список профилей.
 
+### Приватные «Мои новости» (только владелец)
+
+Страница `/private` защищена паролем. При первом запуске сервер создаёт `.state/auth.json`
+(scrypt-хеш) и, если не задан `OBOZ_PRIVATE_PASSWORD`, генерирует пароль в
+`.state/private-password.txt` (0600). Сессия — HttpOnly cookie `oboz_private` (30 дней,
+SameSite=Strict, Secure на https), подписанная HMAC; смена пароля инвалидирует сессии.
+
+- `POST /api/private/login` `{password}` → 200 + cookie; 401; 429 при >6 попыток/10 мин.
+- `GET /api/private/session` → `{authenticated}`; `POST /api/private/logout`.
+- `GET /api/private/catalog` → проекты + темы/города/источники.
+- `GET|PUT /api/private/projects` — проекты владельца.
+- `GET /api/private/digest?threshold=` — подтверждённые события, сгруппированные по проектам
+  (релевантность: ключевые слова×3 в заголовке, темы/города, источники, приоритет).
+
+Проекты: `{id,name,description,enabled,priority,keywords[],topics[],sources[],cities[]}`.
+Дефолтные примеры лежат в `projects.default.json`; правки хранятся в `.state/projects.json`.
+
 ### `GET /healthz`
 
 `{ "ok": true, "uptimeSec": 123, "version": "0.4.0", "cache": {"entries":3,"events":1}, "resources": {"rssMB": 115.2, "heapUsedMB": 28.4, "caches": {"digest":3,"events":1,"static":2}, "feedCacheTtlSec": 1800, "feedbackStored": 4} }`

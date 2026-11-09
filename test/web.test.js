@@ -54,6 +54,7 @@ before(async () => {
       OBOZ_WEB_DEMO: '1',
       OBOZ_WEB_WIKI: '0',
       OBOZ_STATE_DIR: stateDir,
+      OBOZ_PRIVATE_PASSWORD: 'test-password-123',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -308,4 +309,73 @@ test('web: анонимный профиль — сохранение, чтен�
   assert.equal(removed.status, 200);
   const afterDelete = await fetch(`${BASE}/api/profile`, { headers: { 'X-Oboz-Profile': token } });
   assert.equal(afterDelete.status, 404);
+});
+
+
+test('web: приватные «Мои новости» — вход, сессия, проекты, лента', async () => {
+  const unauth = await fetch(`${BASE}/api/private/projects`);
+  assert.equal(unauth.status, 401);
+
+  const sessionBefore = await (await fetch(`${BASE}/api/private/session`)).json();
+  assert.equal(sessionBefore.authenticated, false);
+
+  const bad = await fetch(`${BASE}/api/private/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'wrong-password' }),
+  });
+  assert.equal(bad.status, 401);
+
+  const login = await fetch(`${BASE}/api/private/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'test-password-123' }),
+  });
+  assert.equal(login.status, 200);
+  const setCookie = login.headers.get('set-cookie') || '';
+  assert.match(setCookie, /oboz_private=/);
+  assert.match(setCookie, /HttpOnly/);
+  const cookie = setCookie.split(';')[0];
+
+  const session = await (await fetch(`${BASE}/api/private/session`, { headers: { Cookie: cookie } })).json();
+  assert.equal(session.authenticated, true);
+
+  const catalog = await (await fetch(`${BASE}/api/private/catalog`, { headers: { Cookie: cookie } })).json();
+  assert.ok(Array.isArray(catalog.projects));
+  assert.ok(catalog.categories.length > 0);
+  assert.ok(catalog.sources.length > 0);
+
+  const saved = await fetch(`${BASE}/api/private/projects`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({
+      projects: [{
+        id: 'my-project',
+        name: 'Мой проект',
+        keywords: ['новость', 'тест'],
+        topics: ['tech'],
+        priority: 4,
+      }],
+    }),
+  });
+  assert.equal(saved.status, 200);
+  const savedData = await saved.json();
+  assert.equal(savedData.projects.length, 1);
+  assert.equal(savedData.projects[0].id, 'my-project');
+  assert.deepEqual(savedData.projects[0].keywords, ['новость', 'тест']);
+
+  const projects = await (await fetch(`${BASE}/api/private/projects`, { headers: { Cookie: cookie } })).json();
+  assert.equal(projects.projects[0].name, 'Мой проект');
+
+  const digest = await fetch(`${BASE}/api/private/digest?threshold=0.55`, { headers: { Cookie: cookie } });
+  assert.equal(digest.status, 200);
+  const digestData = await digest.json();
+  assert.ok(Array.isArray(digestData.projects));
+  assert.equal(typeof digestData.totalMatched, 'number');
+
+  const logout = await fetch(`${BASE}/api/private/logout`, { method: 'POST', headers: { Cookie: cookie } });
+  assert.equal(logout.status, 200);
+  assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/);
+  const afterLogout = await (await fetch(`${BASE}/api/private/session`)).json();
+  assert.equal(afterLogout.authenticated, false);
 });

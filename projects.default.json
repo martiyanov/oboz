@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-09",
+  "projects": [
+    {
+      "id": "agonarena",
+      "name": "AgonArena",
+      "description": "Тренажёр переговоров и сложных разговоров с ИИ",
+      "enabled": true,
+      "priority": 5,
+      "keywords": [
+        "переговор",
+        "тренажер",
+        "тренажёр",
+        "деловые игры",
+        "сложные разговоры",
+        "soft skills",
+        "медиац",
+        "конфликт"
+      ],
+      "topics": [
+        "tech",
+        "society",
+        "economy"
+      ],
+      "sources": [],
+      "cities": []
+    },
+    {
+      "id": "conflict-resolution",
+      "name": "Conflict Resolution",
+      "description": "Ассистент по разрешению конфликтов и медиации",
+      "enabled": true,
+      "priority": 5,
+      "keywords": [
+        "конфликт",
+        "медиац",
+        "примир",
+        "переговор",
+        "посредник",
+        "конфликтолог"
+      ],
+      "topics": [
+        "society",
+        "politics"
+      ],
+      "sources": [],
+      "cities": []
+    },
+    {
+      "id": "ai-tech",
+      "name": "ИИ и технологии",
+      "description": "Нейросети, LLM, автоматизация, инструменты разработки",
+      "enabled": true,
+      "priority": 4,
+      "keywords": [
+        "нейросет",
+        "искусственн интеллект",
+        "ии",
+        "llm",
+        "openai",
+        "chatgpt",
+        "gpt",
+        "агент",
+        "автоматизац",
+        "no-code",
+        "разработк"
+      ],
+      "topics": [
+        "tech",
+        "science"
+      ],
+      "sources": [],
+      "cities": []
+    },
+    {
+      "id": "infra",
+      "name": "Инфраструктура",
+      "description": "Серверы, self-hosted, Nextcloud, Obsidian, безопасность",
+      "enabled": true,
+      "priority": 3,
+      "keywords": [
+        "nextcloud",
+        "obsidian",
+        "self-hosted",
+        "selfhosted",
+        "vps",
+        "сервер",
+        "хостинг",
+        "docker",
+        "kubernetes",
+        "резервн",
+        "шифрован",
+        "уязвим",
+        "утечк"
+      ],
+      "topics": [
+        "tech"
+      ],
+      "sources": [],
+      "cities": []
+    }
+  ]
+}

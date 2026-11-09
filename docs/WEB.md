@@ -102,6 +102,20 @@ ssh openclaw@37.46.18.40 'tail -n 20 /home/openclaw/oboz/.state/feedback.jsonl'
 
 
 
+## Приватные «Мои новости»
+
+`/private` — отдельная страница владельца: вход по паролю (scrypt-хеш в `.state/auth.json`,
+пароль сгенерирован в `.state/private-password.txt` при первом запуске или задан
+`OBOZ_PRIVATE_PASSWORD`), сессия — HttpOnly cookie `oboz_private` на 30 дней (SameSite=Strict,
+Secure на https, HMAC-подпись, смена пароля инвалидирует сессии). Попытки входа ограничены
+6/10 минут на IP.
+
+После входа — лента подтверждённых событий, сгруппированных по проектам. Проект:
+`{name, description, priority, keywords[], topics[], sources[], cities[], enabled}`; совпадение
+обязательно по ключевому слову, темы/источники/города дают бонус к релевантности. Проекты
+редактируются на странице и хранятся в `.state/projects.json` (дефолты — `projects.default.json`).
+Публичный сайт при этом не защищён паролем; без сессии `/api/private/*` отдаёт 401.
+
 ## API
 
 Базовый префикс: `https://agonarena.ru/oboz/`. Полное описание — [`WEB_API.md`](WEB_API.md).

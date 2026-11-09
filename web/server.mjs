@@ -13,6 +13,11 @@ import { ROOT, STATE_DIR } from '../src/paths.js';
 import { hashId } from '../src/util.js';
 import { parseQuery } from '../src/query.js';
 import { loadTopics, categoryList, cityList } from '../src/topics.js';
+import { loadProjects, saveProjects, groupByProjects } from '../src/projects.js';
+import {
+  ensureAuth, checkPassword, createSessionToken, verifySessionToken, parseCookies,
+  sessionCookie, clearSessionCookie, SESSION_COOKIE,
+} from '../src/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -206,6 +211,9 @@ const STATIC_FILES = {
   '/rating': { file: 'rating.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
   '/rating.html': { file: 'rating.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
   '/rating.js': { file: 'rating.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
+  '/private': { file: 'private.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/private.html': { file: 'private.html', type: 'text/html; charset=utf-8', cache: 'no-cache' },
+  '/private.js': { file: 'private.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=300' },
 };
 
 const staticCache = new Map(); // path -> Buffer
@@ -600,6 +608,196 @@ async function handleFeedback(req, res) {
   sendJson(req, res, 200, { ok: true });
 }
 
+const PRIVATE_LOGIN_LIMIT = 6;
+const PRIVATE_LOGIN_WINDOW_MS = 10 * 60_000;
+const privateLoginAttempts = new Map(); // ipHash -> [ts]
+const privateDigestCache = new Map(); // key -> { at, value }
+
+function privateCookieSecure(req) {
+  return String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https'
+    || Boolean(req.socket && req.socket.encrypted);
+}
+
+function privateSession(req) {
+  return parseCookies(req.headers.cookie).get(SESSION_COOKIE) || '';
+}
+
+function isPrivateAuthed(req) {
+  return verifySessionToken(privateSession(req));
+}
+
+function requirePrivate(req, res) {
+  if (isPrivateAuthed(req)) return true;
+  sendError(req, res, 401, 'требуется вход в мои новости');
+  return false;
+}
+
+function privateOriginOk(req) {
+  const origin = req.headers.origin;
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    const allowed = new Set([host, `www.${host}`]);
+    return allowed.has(parsed.host) && (parsed.protocol === 'https:' || parsed.protocol === 'http:');
+  } catch {
+    return false;
+  }
+}
+
+function privateLoginRateOk(ip) {
+  const now = Date.now();
+  const key = hashId(ip);
+  const attempts = (privateLoginAttempts.get(key) || []).filter((ts) => ts > now - PRIVATE_LOGIN_WINDOW_MS);
+  if (attempts.length >= PRIVATE_LOGIN_LIMIT) return false;
+  attempts.push(now);
+  privateLoginAttempts.set(key, attempts);
+  return true;
+}
+
+async function readJsonBody(req, limitBytes) {
+  const body = await readBody(req, limitBytes);
+  return JSON.parse(body.toString('utf8') || '{}');
+}
+
+async function handlePrivateLogin(req, res) {
+  if (!privateOriginOk(req)) {
+    sendError(req, res, 403, 'origin not allowed');
+    return;
+  }
+  if (!privateLoginRateOk(clientIp(req))) {
+    sendError(req, res, 429, 'слишком много попыток входа, попробуйте позже');
+    return;
+  }
+  let payload;
+  try {
+    payload = await readJsonBody(req, 4096);
+  } catch {
+    sendError(req, res, 400, 'не удалось прочитать пароль');
+    return;
+  }
+  const ok = await checkPassword(String(payload.password || ''));
+  if (!ok) {
+    sendError(req, res, 401, 'неверный пароль');
+    return;
+  }
+  const token = createSessionToken();
+  res.setHeader('Set-Cookie', sessionCookie(token, privateCookieSecure(req)));
+  sendJson(req, res, 200, { ok: true });
+}
+
+async function handlePrivateApi(req, res, url) {
+  const pathname = url.pathname;
+  if (pathname === '/api/private/session') {
+    sendJson(req, res, 200, { authenticated: isPrivateAuthed(req) });
+    return true;
+  }
+  if (pathname === '/api/private/login') {
+    if (req.method !== 'POST') {
+      sendError(req, res, 405, 'method not allowed');
+      return true;
+    }
+    await handlePrivateLogin(req, res);
+    return true;
+  }
+  if (pathname === '/api/private/logout') {
+    if (req.method !== 'POST') {
+      sendError(req, res, 405, 'method not allowed');
+      return true;
+    }
+    res.setHeader('Set-Cookie', clearSessionCookie(privateCookieSecure(req)));
+    sendJson(req, res, 200, { ok: true });
+    return true;
+  }
+  if (!requirePrivate(req, res)) return true;
+
+  if (pathname === '/api/private/catalog' && req.method === 'GET') {
+    const { projects } = await loadProjects();
+    const { sources } = await loadSources();
+    sendJson(req, res, 200, {
+      projects,
+      categories: categoryList(topicsCatalog),
+      cities: cityList(topicsCatalog),
+      sources: sources.map((source) => ({
+        id: source.id, name: source.name, region: source.region, tier: source.tier,
+      })),
+    });
+    return true;
+  }
+
+  if (pathname === '/api/private/projects') {
+    if (req.method === 'GET') {
+      const { projects } = await loadProjects();
+      sendJson(req, res, 200, { projects });
+      return true;
+    }
+    if (req.method === 'PUT') {
+      if (!privateOriginOk(req)) {
+        sendError(req, res, 403, 'origin not allowed');
+        return true;
+      }
+      let payload;
+      try {
+        payload = await readJsonBody(req, 128 * 1024);
+      } catch {
+        sendError(req, res, 400, 'не удалось прочитать проекты');
+        return true;
+      }
+      const saved = await saveProjects(payload.projects);
+      privateDigestCache.clear();
+      sendJson(req, res, 200, { ok: true, projects: saved.projects, updatedAt: saved.updatedAt });
+      return true;
+    }
+    sendError(req, res, 405, 'method not allowed');
+    return true;
+  }
+
+  if (pathname === '/api/private/digest' && req.method === 'GET') {
+    const threshold = roundThreshold(url.searchParams.get('threshold'), config.threshold ?? 0.55);
+    const refresh = url.searchParams.get('refresh') === '1';
+    const key = threshold.toFixed(2);
+    const cached = privateDigestCache.get(key);
+    if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      sendJson(req, res, 200, { ...cached.value, cached: true });
+      return true;
+    }
+    const { projects } = await loadProjects();
+    const digest = await buildDigest({
+      region: 'all', threshold, limit: 60, wiki: false, demo: DEMO,
+    });
+    const groups = groupByProjects(digest.passed, projects).map((group) => ({
+      project: {
+        id: group.project.id,
+        name: group.project.name,
+        description: group.project.description,
+        priority: group.project.priority,
+      },
+      events: group.events.slice(0, 8).map((event) => ({
+        ...publicEvent(event),
+        relevance: event.relevance,
+      })),
+      total: group.events.length,
+    }));
+    const value = {
+      generatedAt: new Date().toISOString(),
+      threshold,
+      digestStats: { events: digest.stats.events, passed: digest.stats.passed, sources: digest.stats.sources },
+      projects: groups,
+      totalMatched: groups.reduce((sum, group) => sum + group.total, 0),
+    };
+    privateDigestCache.set(key, { at: Date.now(), value });
+    if (privateDigestCache.size > 8) {
+      const oldest = [...privateDigestCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) privateDigestCache.delete(oldest[0]);
+    }
+    sendJson(req, res, 200, value);
+    return true;
+  }
+
+  sendError(req, res, 404, 'unknown private api method');
+  return true;
+}
+
 async function handleApi(req, res, url) {
   const { pathname, searchParams } = url;
 
@@ -722,6 +920,10 @@ const server = http.createServer(async (req, res) => {
 
   const { pathname } = url;
   try {
+    if (pathname.startsWith('/api/private/')) {
+      await handlePrivateApi(req, res, url);
+      return;
+    }
     if (pathname === '/api/profile') {
       if (req.method === 'GET' || req.method === 'PUT' || req.method === 'DELETE') {
         await handleProfile(req, res, url);
@@ -778,6 +980,8 @@ const server = http.createServer(async (req, res) => {
 
 async function main() {
   config = await loadConfig();
+  const authInfo = await ensureAuth({ log });
+  log(`private: доступ ${authInfo.generated ? 'по сгенерированному паролю' : 'по OBOZ_PRIVATE_PASSWORD'}`);
   topicsCatalog = await loadTopics();
   try {
     const pkg = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
