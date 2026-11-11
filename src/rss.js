@@ -60,6 +60,7 @@ export function parseRss(xml, source) {
       categories,
       author,
       region: deriveRegion(source, categories, title),
+      sourceRegion: source.region === 'world' ? 'world' : 'ru',
       sourceTopics: Array.isArray(source.topics) ? source.topics : [],
       sourceCity: source.city || null,
     });

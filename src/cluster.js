@@ -103,6 +103,7 @@ function buildCluster(entries) {
   const latestAt = Math.max(...articles.map((a) => a.publishedAt || 0));
   const domains = [...new Set(articles.map((a) => canonicalDomain(a.domain || a.link)))];
   const topics = [...new Set(articles.flatMap((a) => a.topics || []))];
+  const sourceTopics = [...new Set(articles.flatMap((a) => a.sourceTopics || []))];
   const cities = [...new Set(articles.flatMap((a) => a.cities || []))];
   const sourceScope = new Set(articles.map((a) => (a.region === 'world' ? 'world' : 'ru')));
   const geo = countGeoHints(`${headline} ${summary}`);
@@ -120,6 +121,7 @@ function buildCluster(entries) {
     entities: extractEntities(`${headline}. ${summary}`, 6),
     scope,
     topics,
+    sourceTopics,
     cities,
     articles,
     domains,

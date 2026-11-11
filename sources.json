@@ -497,6 +497,116 @@
       ],
       "city": "nizhny",
       "enabled": true
+    },
+    {
+      "id": "washingtonpost-world",
+      "name": "The Washington Post World",
+      "url": "https://feeds.washingtonpost.com/rss/world",
+      "site": "https://www.washingtonpost.com/world/",
+      "lang": "en",
+      "region": "world",
+      "tier": "A",
+      "type": "foreign",
+      "topics": [
+        "world",
+        "politics",
+        "economy"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "npr-world",
+      "name": "NPR World",
+      "url": "https://feeds.npr.org/1004/rss.xml",
+      "site": "https://www.npr.org/sections/world/",
+      "lang": "en",
+      "region": "world",
+      "tier": "A",
+      "type": "foreign",
+      "topics": [
+        "world",
+        "politics",
+        "society"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "cnn-world",
+      "name": "CNN World",
+      "url": "http://rss.cnn.com/rss/edition_world.rss",
+      "site": "https://edition.cnn.com/world",
+      "lang": "en",
+      "region": "world",
+      "tier": "B",
+      "type": "foreign",
+      "topics": [
+        "world",
+        "politics"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "wsj-world",
+      "name": "The Wall Street Journal World",
+      "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+      "site": "https://www.wsj.com/news/world",
+      "lang": "en",
+      "region": "world",
+      "tier": "A",
+      "type": "business",
+      "topics": [
+        "world",
+        "economy",
+        "politics"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "bloomberg-world",
+      "name": "Bloomberg Markets",
+      "url": "https://feeds.bloomberg.com/markets/news.rss",
+      "site": "https://www.bloomberg.com/markets",
+      "lang": "en",
+      "region": "world",
+      "tier": "B",
+      "type": "business",
+      "topics": [
+        "world",
+        "economy"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "un-news",
+      "name": "UN News",
+      "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+      "site": "https://news.un.org/en/",
+      "lang": "en",
+      "region": "world",
+      "tier": "A",
+      "type": "foreign",
+      "topics": [
+        "world",
+        "politics",
+        "society"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "economist-world",
+      "name": "The Economist",
+      "url": "https://www.economist.com/the-world-this-week/rss.xml",
+      "site": "https://www.economist.com/the-world-this-week",
+      "lang": "en",
+      "region": "world",
+      "tier": "B",
+      "type": "business",
+      "topics": [
+        "world",
+        "politics",
+        "economy"
+      ],
+      "enabled": true
     }
   ]
 }

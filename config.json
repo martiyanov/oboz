@@ -47,7 +47,26 @@
           "сбил",
           "пво",
           "инфраструктур",
-          "энергет"
+          "энергет",
+          "war",
+          "wars",
+          "airstrike",
+          "air strike",
+          "missile",
+          "drone",
+          "offensive",
+          "troops",
+          "attack",
+          "attacks",
+          "strike",
+          "strikes",
+          "nuclear",
+          "invasion",
+          "shelling",
+          "bomb",
+          "bombing",
+          "combat",
+          "frontline"
         ]
       },
       {
@@ -57,7 +76,20 @@
           "взрыв",
           "подрыв",
           "заложник",
-          "захват"
+          "захват",
+          "terror",
+          "terrorist",
+          "explosion",
+          "hostage",
+          "shooting",
+          "mass shooting",
+          "killed",
+          "dead",
+          "death",
+          "deaths",
+          "casualt",
+          "injured",
+          "wounded"
         ]
       },
       {
@@ -69,7 +101,20 @@
           "жертв",
           "ранен",
           "пострадал",
-          "труп"
+          "труп",
+          "terror",
+          "terrorist",
+          "explosion",
+          "hostage",
+          "shooting",
+          "mass shooting",
+          "killed",
+          "dead",
+          "death",
+          "deaths",
+          "casualt",
+          "injured",
+          "wounded"
         ]
       },
       {
@@ -84,7 +129,17 @@
           "пожар",
           "авари",
           "эвакуац",
-          "чрезвычайн"
+          "чрезвычайн",
+          "earthquake",
+          "hurricane",
+          "flood",
+          "floods",
+          "tsunami",
+          "wildfire",
+          "crash",
+          "emergency",
+          "evacuat",
+          "disaster"
         ]
       },
       {
@@ -94,7 +149,12 @@
           "эмбарго",
           "замороз",
           "конфискац",
-          "депорт"
+          "депорт",
+          "sanction",
+          "sanctions",
+          "embargo",
+          "expel",
+          "deport"
         ]
       },
       {
@@ -109,7 +169,15 @@
           "банкрот",
           "дефицит",
           "девальвац",
-          "рецесси"
+          "рецесси",
+          "crisis",
+          "default",
+          "inflation",
+          "recession",
+          "collapse",
+          "bankrupt",
+          "deficit",
+          "devaluat"
         ]
       },
       {
@@ -129,7 +197,20 @@
           "саммит",
           "президент",
           "премьер",
-          "министр"
+          "министр",
+          "putin",
+          "kremlin",
+          "government",
+          "election",
+          "elections",
+          "summit",
+          "president",
+          "prime minister",
+          "minister",
+          "talks",
+          "deal",
+          "treaty",
+          "ceasefire"
         ]
       },
       {
@@ -142,7 +223,14 @@
           "налог",
           "тариф",
           "льгот",
-          "пособ"
+          "пособ",
+          "ban",
+          "bans",
+          "restrict",
+          "tariff",
+          "tariffs",
+          "tax",
+          "taxes"
         ]
       },
       {
@@ -155,7 +243,13 @@
           "уголовн",
           "коррупц",
           "следствен",
-          "прокуратур"
+          "прокуратур",
+          "court",
+          "arrest",
+          "corruption",
+          "trial",
+          "verdict",
+          "prosecut"
         ]
       },
       {
@@ -164,7 +258,11 @@
           "протест",
           "митинг",
           "забастовк",
-          "петиц"
+          "петиц",
+          "protest",
+          "protests",
+          "rally",
+          "petition"
         ]
       },
       {
@@ -174,7 +272,13 @@
           "эпидем",
           "пандеми",
           "вакцин",
-          "заболева"
+          "заболева",
+          "virus",
+          "epidemic",
+          "pandemic",
+          "vaccine",
+          "outbreak",
+          "disease"
         ]
       },
       {
@@ -184,7 +288,11 @@
           "вперв",
           "историческ",
           "климат",
-          "потеплен"
+          "потеплен",
+          "record",
+          "historic",
+          "climate",
+          "warming"
         ]
       },
       {
@@ -195,7 +303,13 @@
           "чемпионат",
           "олимпиад",
           "футбол",
-          "хокке"
+          "хокке",
+          "match",
+          "championship",
+          "olympic",
+          "football",
+          "soccer",
+          "hockey"
         ]
       }
     ]

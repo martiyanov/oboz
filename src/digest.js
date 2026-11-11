@@ -101,11 +101,33 @@ export async function buildDigest(options = {}) {
     event.wikiLoaded = false;
     event.reasons = gateReasons(event, { ...config, threshold });
     event.region = cluster.scope;
+    event.sourceTopics = cluster.sourceTopics || [];
+    const knownRegions = (cluster.articles || []).filter((article) => article.sourceRegion === 'ru' || article.sourceRegion === 'world');
+    event.sourceRegions = knownRegions.length
+      ? knownRegions.reduce((counts, article) => {
+        counts[article.sourceRegion] += 1;
+        return counts;
+      }, { ru: 0, world: 0 })
+      : null;
     event.passed = isPassing(event, threshold);
     evaluated.push(event);
   }
 
-  const scoped = evaluated.filter((event) => region === 'all' || event.scope.includes(region));
+  // Регион определяется большинством источников события, а не одним «иностранным»
+  // источником в российском сюжете. Для общего раздела «Мир» дополнительно требуем,
+  // чтобы событие освещал хотя бы один источник с темой world (без TechCrunch/Pitchfork).
+  const scoped = evaluated.filter((event) => {
+    if (region === 'all') return true;
+    const counts = event.sourceRegions;
+    if (!counts) return Boolean(event.scope?.includes(region));
+    const total = counts.ru + counts.world;
+    if (!total) return Boolean(event.scope?.includes(region));
+    // Строгое большинство: событие «российское» не должно попадать в «Мир» только
+    // потому, что его перепечатал один зарубежный источник, и наоборот.
+    if (region === 'ru' ? counts.ru <= counts.world : counts.world <= counts.ru) return false;
+    if (!options.demo && region === 'world' && category === 'all' && !(event.sourceTopics || []).includes('world')) return false;
+    return true;
+  });
   scoped.sort((a, b) => b.score - a.score || (b.latestAt || 0) - (a.latestAt || 0));
 
   const matchingFilters = filterByCategoryCity(scoped, { category, city });

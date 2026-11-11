@@ -127,7 +127,8 @@ curl -s 'https://agonarena.ru/oboz/api/event/<id>'
 curl -s https://agonarena.ru/oboz/api/sources
 ```
 
-Параметры `digest`: `region=ru|world|all`, `threshold=0.30…0.95` (шаг 0.05), `limit=6…30`,
+Параметры `digest`: `region=ru|world|all` (`world` — только события, где строго большинство
+источников зарубежные), `threshold=0.30…0.95` (шаг 0.05), `limit=6…30`,
 `refresh=1` — принудительный пересчёт (не чаще раза в 30 с). Ответ кэшируется в памяти на 3 минуты;
 устаревший кэш отдаётся сразу, а обновление идёт в фоне.
 

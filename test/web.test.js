@@ -185,9 +185,9 @@ test('web: /api/event/<id> отдаёт досье, /api/sources — катал�
   assert.ok(data.event.claims.length >= 1);
 
   const sources = await (await fetch(`${BASE}/api/sources`)).json();
-  assert.equal(sources.stats.total, 32);
-  assert.equal(sources.stats.enabled, 32);
-  assert.equal(sources.sources.length, 32);
+  assert.ok(sources.stats.total >= 32);
+  assert.equal(sources.stats.enabled, sources.stats.total);
+  assert.equal(sources.sources.length, sources.stats.total);
   assert.ok(sources.sources.some((source) => source.city === 'moscow'));
   assert.ok(sources.sources.some((source) => source.city === 'nizhny'));
 });
